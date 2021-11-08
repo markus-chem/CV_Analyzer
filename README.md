@@ -4,3 +4,5 @@
 Literature data is digitized using svgdigitizer and a database is created.
 The CV_Analyzer tool can filter the database and plot the digitized CVs.
 Different corrections as explained below can be applied.
+
+- change of the reference electrode
