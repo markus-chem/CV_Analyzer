@@ -10,52 +10,35 @@ import os
 import sys
 import numpy as np
 
+
 class CV_Analyzer_class:
-    def __init__(self, p, resource_no): # initialize with basic information of package
+    def __init__(self, p, resource_no):  # initialize with basic information of package
         self.package = p
-        # self.CV = p.get_resource(p.resource_names[resource_no]).read(keyed=True)
         self.CV_df = pd.read_csv(p.resources[0].raw_iter(stream=False))
-        # pd.DataFrame(data=self.CV).apply(pd.to_numeric, downcast='float') # to pandas dataframe, convert from Decimal to Float
-        self.name = p.resource_names[resource_no] # the name of the resource
+        self.name = p.resource_names[resource_no]  # the name of the resource
         self.metadata = p.descriptor
         self.RE = p.descriptor['electrochemical system']['electrodes']['reference electrode']['type']
         self.metal = p.descriptor['electrochemical system']['electrodes']['working electrode']['material']
-        self.lattice_plane = p.descriptor['electrochemical system']['electrodes']['working electrode']['crystallographic orientation']
-        self.electrolyte_name = [p.descriptor['electrochemical system']['electrolyte']['components'][i]['name'] for i in [0,3]] # assumes that there are only 2 components
-        self.electrolyte_conc = [p.descriptor['electrochemical system']['electrolyte']['components'][i]['concentration']['value'] for i in [0,3]]
-        self.electrolyte_unit = [p.descriptor['electrochemical system']['electrolyte']['components'][i]['concentration']['unit'] for i in [0,3]]
-        self.electrolyte = [f'{self.electrolyte_conc[i]} {self.electrolyte_unit[i]} {self.electrolyte_name[i]}' for i in range(2)]
-        self.scan_rate = p.descriptor['figure description']['scan rate']['value'] / 1000 # scan rate in V/
+        self.lattice_plane = p.descriptor['electrochemical system'][
+            'electrodes']['working electrode']['crystallographic orientation']
+        self.electrolyte_name = [
+            p.descriptor['electrochemical system']['electrolyte']['components'][i]['name'] for i in [
+                0, 3]]  # assumes that there are only 2 components
+        self.electrolyte_conc = [p.descriptor['electrochemical system'][
+            'electrolyte']['components'][i]['concentration']['value'] for i in [0, 3]]
+        self.electrolyte_unit = [p.descriptor['electrochemical system'][
+            'electrolyte']['components'][i]['concentration']['unit'] for i in [0, 3]]
+        self.electrolyte = [
+            f'{self.electrolyte_conc[i]} {self.electrolyte_unit[i]} {self.electrolyte_name[i]}' for i in range(2)]
+        self.scan_rate_unit = p.descriptor['figure description']['scan rate']['unit']
+        if self.scan_rate_unit == 'mV / s':
+            self.scan_rate = p.descriptor['figure description']['scan rate']['value'] / 1000
+        else:
+            self.scan_rate = p.descriptor['figure description']['scan rate']['value']
+        self.T = p.descriptor['electrochemical system']['electrolyte']['temperature']['value']
         self.label = f'{self.metal}({self.lattice_plane}) in {self.electrolyte}; {self.name}'
 
-    def ref_to(self, target_RE):
-        # reference to another RE
-
-        # check if target_RE exists
-        if target_RE in RE_dict or target_RE=='pzc' or target_RE=='RHE':
-            pass
-        else:
-            print('Select one of the following RE')
-            print('pzc')
-            for key in RE_dict:
-                print(key)
-            sys.exit('target reference is unknown')
-
-        # check for pH dependency
-        if target_RE == 'RHE':
-            pH = self.metadata['electrochemical system']['electrolyte']['ph']['value']
-            if pH == None:
-                sys.exit('No pH value given. Conversion to RHE not possible.')
-            else:
-                offset = RE_dict[str(target_RE)] - RE_dict[str(self.RE)] - 0.059*pH # 59 mV shift per pH unit
-        if target_RE == 'pzc':
-            offset = pzc_dict[self.metal][self.lattice_plane] - RE_dict[str(self.RE)] - RE_dict['U_abs']
-        else:
-            offset = RE_dict[str(target_RE)] - RE_dict[str(self.RE)]
-
-        return offset
-
-    def plot(self):
+    def plot_orig(self):
         # plot the non-manipulated CV data
         fig = plt.figure('Original CV')
         plt.plot(self.CV_df['U'], self.CV_df['j'], label=self.label)
@@ -64,213 +47,334 @@ class CV_Analyzer_class:
 
         return fig
 
-    def reference_electrode(self, target_RE='SHE'):
-        # convert to another voltage reference
-        # absoulte potentials of other reference electrodes vs. SHE are in reference_electrode_dict
+    def plot(
+            self,
+            target_RE='SHE',
+            capac=False,
+            atomic=False,
+            conc_corr=False):
 
-        self.CV_df['U'] = self.CV_df['U'] - self.ref_to(target_RE)
-        self.CV_df['C'] = self.CV_df['j'] / self.scan_rate
-        print(f'Reference changed from {self.RE} to {target_RE}')
+        settings = f'capac={capac}, atomic={atomic}, conc_corr={conc_corr}'
 
-        #plot
-        fig = plt.figure(f'CV referenced to {target_RE}')
-        plt.plot(self.CV_df['U'], self.CV_df['C'], label=self.label)
-        plt.xlabel(f'U / V vs. {target_RE}')
-        plt.ylabel('j / A/m$^2$')
+        # extra columns for corrections
+        self.CV_df['U_corr'] = self.CV_df['U']
+        self.CV_df['j_corr'] = self.CV_df['j']
 
-        return fig
+        # reference correction
+        self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.ref_to(target_RE)
 
-    def site_norm(self, target_RE, unit='atomic'):
-        # normalize current on lattice sites (in atoms/m²)
-        self.CV_df['U'] = self.CV_df['U'] - self.ref_to(target_RE) # reference to another RE
-        norm_factor = atomic_density(self.metal, self.lattice_plane) * 10**20 # from atoms/Angstrom² to atoms/m²
-        self.CV_df['j'] = self.CV_df['j'] / norm_factor # A/m² / atoms/m² = A/atom
-
-        # atomic units for current
-        if unit == 'atomic': # convert into e- / (s*atom)
-            self.CV_df['j'] = self.CV_df['j'] / constants.value('elementary charge')
-            print(f'Current normalized to atomic density of {self.metal} ({self.lattice_plane}) ( e-/(s*atom) ).')
+        # current in capacitance
+        if capac:
+            self.CV_df['j_corr'] = self.CV_df['j_corr'] / self.scan_rate
         else:
-            print(f'Current normalized to atomic density of {self.metal} ({self.lattice_plane}) (A/atom).')
+            pass
+
+        # current in atomic units
+        if atomic:
+            self.CV_df['j_corr'] = self.CV_df['j_corr'] / atomic_density(
+                self.metal, self.lattice_plane)  # A/m² / atoms/m² = A/atom
+        else:
+            pass
+
+        # apply concentration correction
+        if conc_corr:
+            self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.conc_corr()
+        else:
+            pass
 
         # plot
-        fig = plt.figure(f'Current normalized to atomic density')
-        plt.plot(self.CV_df['U'], self.CV_df['j'], label=self.label)
+        fig = plt.figure(f'CV_settings: {settings}')
+        plt.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label=self.label)
         plt.xlabel(f'U / V vs. {target_RE}')
-        if unit == 'atomic':
-            plt.ylabel('j / e-/(s*atom)')
-        else:
+        if (capac) & (atomic == False):
+            plt.ylabel('C / F/m$^2$')
+        elif (capac) & (atomic):
+            plt.ylabel('C / F/atom')
+        elif (capac == False) & (atomic == False):
+            plt.ylabel('j / A/m$^2$')
+        elif (capac == False) & (atomic == True):
             plt.ylabel('j / A/atom')
-        
+
         return fig
 
-    def charge_int(self, lower_lim, upper_lim, target_RE, unit='atomic'):
-        import scipy.integrate as integrate
+    def charge_int(
+            self,
+            lower_lim,
+            upper_lim,
+            target_RE,
+            unit='atomic',
+            conc_corr=False):
 
-        # integrate the charge within the given voltage limits (ref. to target_RE)
-        self.CV_df['U'] = self.CV_df['U'] - self.ref_to(target_RE) # reference to another RE
+        # extra columns for corrections
+        self.CV_df['U_corr'] = self.CV_df['U']
+        self.CV_df['j_corr'] = self.CV_df['j']
 
         # check voltage limits
-        if lower_lim < min(self.CV_df['U']) or upper_lim > max(self.CV_df['U']):
+        if lower_lim < min(
+                self.CV_df['U_corr']) or upper_lim > max(
+                self.CV_df['U_corr']):
             sys.exit(f'Voltage limits out of range for {self.name}')
+
+        # reference to target_RE
+        self.CV_df['U_corr'] = self.CV_df['U'] - \
+            self.ref_to(target_RE)  # reference to another RE
+
+        # apply concentration correction
+        if conc_corr:
+            self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.conc_corr()
+        else:
+            pass
 
         # atomic units
         if unit == 'atomic':
-            norm_factor = atomic_density(self.metal, self.lattice_plane) * 10**20 # from atoms/Angstrom² to atoms/m²
-            self.CV_df['j'] = self.CV_df['j'] / constants.value('elementary charge') / norm_factor # A/m² / C/e- / atoms/m² = e-/(s*atom)
+            # from atoms/Angstrom² to atoms/m²
+            norm_factor = atomic_density(
+                self.metal, self.lattice_plane) * 10**20
+            self.CV_df['j_corr'] = self.CV_df['j'] / constants.e / \
+                norm_factor  # A/m² / C/e- / atoms/m² = e-/(s*atom)
 
         # seperate anodic and cathodic scan, apply voltage limits
-        forw_scan = self.CV_df.where((self.CV_df['j'] > 0) & (self.CV_df['U'] > lower_lim) & (self.CV_df['U'] < upper_lim))
-        backw_scan = self.CV_df.where((self.CV_df['j'] < 0) & (self.CV_df['U'] > lower_lim) & (self.CV_df['U'] < upper_lim))
-        int_voltage_forw = forw_scan['U'] - lower_lim # first point will be U=0V
-        int_voltage_backw = backw_scan['U'] - lower_lim
+        forw_scan = self.CV_df.where(
+            (self.CV_df['j_corr'] > 0) & (
+                self.CV_df['U_corr'] > lower_lim) & (
+                self.CV_df['U_corr'] < upper_lim))
+        backw_scan = self.CV_df.where(
+            (self.CV_df['j_corr'] < 0) & (
+                self.CV_df['U_corr'] > lower_lim) & (
+                self.CV_df['U_corr'] < upper_lim))
+
+        # voltage for the integration needs to start with 0 V
+        int_voltage_forw = forw_scan['U_corr'] - lower_lim
+        int_voltage_backw = backw_scan['U_corr'] - lower_lim
+
+        # convert to numpy and remove nan (needed for np.trapz() integration)
+        voltage_forw_np = forw_scan['U_corr'].to_numpy()
+        voltage_forw_np = voltage_forw_np[~np.isnan(voltage_forw_np)]
+        voltage_backw_np = backw_scan['U_corr'].to_numpy()
+        voltage_backw_np = voltage_backw_np[~np.isnan(voltage_backw_np)]
+        forw_scan_np = forw_scan['j_corr'].to_numpy()
+        forw_scan_np = forw_scan_np[~np.isnan(forw_scan_np)]
+        backw_scan_np = backw_scan['j_corr'].to_numpy()
+        backw_scan_np = backw_scan_np[~np.isnan(backw_scan_np)]
+        int_voltage_forw_np = np.array(int_voltage_forw)
+        int_voltage_forw_np = int_voltage_forw_np[~np.isnan(
+            int_voltage_forw_np)]
+        int_voltage_backw_np = np.array(int_voltage_backw)
+        int_voltage_backw_np = int_voltage_backw_np[~np.isnan(
+            int_voltage_backw_np)]
 
         # integrate
-        Q_forw = int_voltage_forw * forw_scan['j'] / self.scan_rate
-        Q_forw_sum = Q_forw.sum() # in C/m² or e-/atom (if unit = atomic)
-        Q_forw_int = [(forw_scan.iloc[:i]['j'] * int_voltage_forw[:i]).sum() for i in range(len(forw_scan))]
-        Q_backw = int_voltage_backw * backw_scan['j'] / self.scan_rate
-        Q_backw_sum = Q_backw.sum() # in C/m² or e-/atom (if unit = atomic)
-        Q_backw_int = [(backw_scan.iloc[:i]['j'] * int_voltage_backw[:i]).sum() for i in range(len(forw_scan))]
+        Q_forw_int = [np.trapz(forw_scan_np[:i +
+                                            1], int_voltage_forw_np[:i +
+                                                                    1]) /
+                      self.scan_rate for i in range(len(forw_scan_np))]
+        Q_backw_int = [np.trapz(backw_scan_np[:i +
+                                              1], int_voltage_backw_np[:i +
+                                                                       1]) /
+                       self.scan_rate for i in range(len(backw_scan_np))]
 
-        # prints
-        if unit == 'atomic':
-            print(f'forward scan: Q={round(Q_forw_sum, 2)} e-/atom for {lower_lim} < U < {upper_lim}')
-            print(f'backward scan: Q={round(Q_backw_sum, 2)} e-/atom for {lower_lim} < U < {upper_lim}')
-        else:
-            print(f'backward scan: Q={round(Q_backw_sum, 2)} C/m² for {lower_lim} < U < {upper_lim}')
-            print(f'forward scan: Q={round(Q_forw_sum, 2)} C/m² for {lower_lim} < U < {upper_lim}')
-
-        # plot forward and backward scan
+        # plot CV with limits
         fig = plt.figure('integrated CV')
-        plt.plot(self.CV_df['U'], self.CV_df['j'], label=self.label)
-        plt.plot(forw_scan['U'], forw_scan['j'])
-        plt.plot(backw_scan['U'], backw_scan['j'])
-        plt.vlines(lower_lim, min(self.CV_df['j']), max(self.CV_df['j']), color='grey', linestyles='solid')
-        plt.vlines(upper_lim, min(self.CV_df['j']), max(self.CV_df['j']), color='grey', linestyles='solid')
+        plt.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label=self.label)
+        plt.vlines(
+            lower_lim, min(
+                self.CV_df['j']), max(
+                self.CV_df['j']), color='grey', linestyles='solid')
+        plt.vlines(
+            upper_lim, min(
+                self.CV_df['j']), max(
+                self.CV_df['j']), color='grey', linestyles='solid')
         plt.xlabel(f'U / V vs. {target_RE}')
         if unit == 'atomic':
             plt.ylabel('j / e-/(s*atom)')
         else:
             plt.ylabel('j / A/m²')
 
-        # evaluate Q over voltage
+        # evaluate Q_forw over voltage and plot
         fig2 = plt.figure('charge integration forward')
-        plt.plot(forw_scan['U'], Q_forw_int, label=f'{self.label} forward scan')
+        plt.plot(voltage_forw_np, Q_forw_int, label=f'{self.label}')
         plt.xlabel(f'U / V vs. {target_RE}')
         if unit == 'atomic':
             plt.ylabel('Q / e-/atom')
         else:
             plt.ylabel('Q / C/m²')
 
+        # evaluate Q_backw over voltage and plot
         fig3 = plt.figure('charge integration backward')
-        plt.plot(backw_scan['U'], Q_backw_int, label=f'{self.label} backward scan')
+        plt.plot(voltage_backw_np, Q_backw_int, label=f'{self.label}')
         plt.xlabel(f'U / V vs. {target_RE}')
         if unit == 'atomic':
             plt.ylabel('Q / e-/atom')
         else:
             plt.ylabel('Q / C/m²')
-        
+
         return fig, fig2, fig3
 
-
-    # def peaks(self, lower_lim, upper_lim, target_RE):
-    #     from scipy.signal import find_peaks
-        
-    #     self.CV_df['U'] = self.CV_df['U'] - self.ref_to(target_RE) # reference to another RE
-
-    #     # check voltage limits
-    #     if lower_lim < min(self.CV_df['U']) or upper_lim > max(self.CV_df['U']):
-    #         sys.exit('Voltage limits out of range')
-
-    #     # seperate anodic and cathodic scan, apply voltage limits
-    #     forw_scan = self.CV_df.where((self.CV_df['j'] > 0) & (self.CV_df['U'] > lower_lim) & (self.CV_df['U'] < upper_lim))
-    #     backw_scan = self.CV_df.where((self.CV_df['j'] < 0) & (self.CV_df['U'] > lower_lim) & (self.CV_df['U'] < upper_lim))
-
-    def max_min(self, lower_lim, upper_lim, target_RE):
-        self.CV_df['U'] = self.CV_df['U'] - self.ref_to(target_RE) # reference to another RE
+    def max_min(self, lower_lim, upper_lim, target_RE, capac=False):
+        self.CV_df['U_corr'] = self.CV_df['U'] - \
+            self.ref_to(target_RE)  # reference to another RE
 
         # check voltage limits
-        if lower_lim < min(self.CV_df['U']) or upper_lim > max(self.CV_df['U']):
+        if lower_lim < min(
+                self.CV_df['U']) or upper_lim > max(
+                self.CV_df['U']):
             sys.exit(f'Voltage limits out of range for {self.name}')
-        
-        idx = (self.CV_df['j'].idxmax(), self.CV_df['j'].idxmin())
+
+        # calculate capacitance if needed
+        if capac:
+            self.CV_df['j_corr'] = self.CV_df['j'] / self.scan_rate
+        else:
+            self.CV_df['j_corr'] = self.CV_df['j']
+
+        idx = (self.CV_df['j_corr'].idxmax(), self.CV_df['j_corr'].idxmin())
         max_ = self.CV_df.iloc[idx[0]]
         min_ = self.CV_df.iloc[idx[1]]
 
         fig = plt.figure('Max_Min of CV')
-        plt.plot(self.CV_df['U'], self.CV_df['j'], label=self.label)
+        plt.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label=self.label)
         plt.scatter(max_[1], max_[2], marker='X', color='r')
         plt.scatter(min_[1], min_[2], marker='X', color='r')
-        plt.xlabel(f'U / V vs. {self.RE}')
+        plt.xlabel(f'U / V vs. {target_RE}')
         plt.ylabel('j / A/m$^2$')
 
-        print(f'Maximum: U = {round(max_[1], 2)}, j = {round(max_[2], 2)} \nMinimum U = {round(min_[1], 2)}, j = {round(min_[2], 2)}')
+        print(
+            f'Maximum: U = {round(max_[1], 2)}, j = {round(max_[2], 2)} \nMinimum U = {round(min_[1], 2)}, j = {round(min_[2], 2)}')
 
         return fig
 
-def filter(files, metal, lattice_plane, component, author_name, not_this_name):
-    selected = set(files)
-    for i in files:
-        p = Package(i)
-        entry = CV_Analyzer_class(p, 0) # resource_no 0 as default
-        
+
+def ref_to(self, target_RE):
+    # reference to another RE
+
+    # check if target_RE exists
+    if target_RE in RE_dict or target_RE == 'pzc' or target_RE == 'RHE':
+        pass
+    else:
+        print('Select one of the following RE')
+        print('pzc')
+        for key in RE_dict:
+            print(key)
+        sys.exit('target reference is unknown')
+
+    # check for pH dependency
+    if target_RE == 'RHE':
+        pH = self.metadata['electrochemical system']['electrolyte']['ph']['value']
+        if pH is None:
+            # try to calculate pH?
+            sys.exit('No pH value given. Conversion to RHE not possible.')
+        else:
+            # offset is later substracted from the voltage
+            offset = RE_dict[str(target_RE)] - RE_dict[str(self.RE)] + constants.R * \
+                self.T / constants.value('Faraday constant') * pH  # 59 mV shift per pH unit
+    if target_RE == 'pzc':
+        offset = pzc_dict[self.metal][self.lattice_plane] - \
+            RE_dict[str(self.RE)] - RE_dict['U_abs']
+    else:
+        offset = RE_dict[str(target_RE)] - RE_dict[str(self.RE)]
+
+    return offset
+
+
+def conc_corr(self):
+    # list of typical halide adsorbates
+    ads_set = {'LiF', 'NaF', 'KF', 'RbF', 'CsF',
+               'LiCl', 'NaCl', 'KCl', 'RbCl', 'CsCl',
+               'LiBr', 'NaBr', 'KBr', 'RbBr', 'CsBr',
+               'LiI', 'NaI', 'KI', 'RbI', 'CsI'
+               }
+    # get list of common elements
+    ads = list(ads_set.intersection(self.electrolyte_name))
+
+    if len(ads) == 0:
+        raise ValueError('No halide adsorbate found')
+    elif len(ads) > 1:
+        raise ValueError(f'Cannot handle more than one adsorbate: {ads}')
+    else:
+        idx = self.electrolyte_name.index(str(ads[0]))
+        ads_conc = self.electrolyte_conc[idx]
+        unit = self.electrolyte_unit[idx]
+
+        if str(unit) == 'uM':
+            ads_conc = ads_conc / 10**6
+        elif str(unit) == 'mM':
+            ads_conc = ads_conc / 1000
+        elif str(unit) == 'M':
+            pass
+        else:
+            raise ValueError(f'Unit Error: {unit}')
+        U_shift = - constants.R * self.T / \
+            constants.value('Faraday constant') * np.log(ads_conc)
+
+    return U_shift  # is later substracted
+
+
+def filter_db(
+        files,
+        metal,
+        lattice_plane,
+        component,
+        author_name,
+        not_this_name):
+    selxn = set(CV_Analyzer_class(Package(i), 0) for i in files)
+    for i in selxn.copy():  # iterate over copy, set cannot be changed during iteration
         if len(metal) > 0:
-            if entry.metadata['electrochemical system']['electrodes']['working electrode']['material'] not in metal:
+            if i.metadata['electrochemical system']['electrodes']['working electrode']['material'] not in metal:
                 try:
-                    selected.remove(i)
-                except:
+                    selxn.remove(i)
+                except BaseException:
                     pass
             else:
                 pass
 
         if len(lattice_plane) > 0:
-            if entry.metadata['electrochemical system']['electrodes']['working electrode']['crystallographic orientation'] not in lattice_plane:
+            if i.metadata['electrochemical system']['electrodes']['working electrode']['crystallographic orientation'] not in lattice_plane:
                 try:
-                    selected.remove(i)
-                except:
+                    selxn.remove(i)
+                except BaseException:
                     pass
             else:
                 pass
 
         if len(component) > 0:
-            l = list(set(component).intersection([entry.metadata['electrochemical system']['electrolyte']['components'][i]['name'] for i in range(4)]))
+            l = list(set(component).intersection(
+                [i.metadata['electrochemical system']['electrolyte']['components'][j]['name'] for j in range(4)]))
             if len(l) == 0:
-                    try:
-                        selected.remove(i)
-                    except:
-                        pass
-            # for j in component:
-            #     if j not in [entry.metadata['electrochemical system']['electrolyte']['components'][i]['name'] for i in range(4)]:
-            #         try:
-            #             selected.remove(i)
-            #         except:
-            #             pass
-            # else:
-            #     pass
+                try:
+                    selxn.remove(i)
+                except BaseException:
+                    pass
 
-        if len(author_name) > 0:    
-            if any(entry.metadata['source']['bib'].find(author_name[j]) == -1 for j in range(len(author_name))):
-                    try:
-                        selected.remove(i)
-                    except:
-                        pass
+        if len(author_name) > 0:
+            if any(
+                i.metadata['source']['bib'].find(
+                    author_name[j]) == -
+                1 for j in range(
+                    len(author_name))):
+                try:
+                    selxn.remove(i)
+                except BaseException:
+                    pass
             else:
                 pass
-        
-        if any(entry.metadata['source']['bib'].find(not_this_name[j]) != -1 for j in range(len(not_this_name))):
-                try:
-                    selected.remove(i)
-                except:
-                    pass
+
+        if any(
+            i.metadata['source']['bib'].find(
+                not_this_name[j]) != -
+                1 for j in range(
+                len(not_this_name))):
+            try:
+                selxn.remove(i)
+            except BaseException:
+                pass
         else:
             pass
-            
 
-    if len(selected) > 0:
-        print(f'{len(selected)} datapackages selected')
-        print(selected)
+    if len(selxn) > 0:
+        print(f'{len(selxn)} files selected')
     else:
-        sys.exit('No datapackages meet filter criteria.')
+        raise ValueError('No datapackages meet filter criteria.')
 
-    return selected
+    return list(selxn)
+
+# def get_exp_CV_data(metal, ads, hkl, ref, conc, ):
+
