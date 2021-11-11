@@ -14,10 +14,10 @@ print(f'{len(files)} files loaded')
 # filter for datapackages
 # empty bracktes mean that no filter is applied
 metal = ['Ag']
-lattice_plane = ['100']
-component = ['LiBr', 'NaBr', 'KBr', 'RbBr']
+lattice_plane = []
+component = ['NaOH']
 author_name = []
-not_this_name = []
+not_this_name = ['Rehim']
 
 selxn = filter_db(
     files,
@@ -30,25 +30,27 @@ selxn = filter_db(
 # %%
 # generic plot
 for i in selxn:
-    fig = i.plot(target_RE='SHE', capac=True, atomic=False, conc_corr=True)
+    fig = i.plot(target_RE='pzc', capac=False, atomic=False, conc_corr=False)
 fig.legend()
-# %%
-# charge integration
-for i in selxn:
-    # lower and upper limit in V, unit = 'atomic' for reference current to
-    # atom sites
-    fig, fig2, fig3 = i.charge_int(
-        lower_lim=-0.2, upper_lim=0.2, target_RE='pzc', unit='atomic')
-fig.legend()
-fig2.legend()
-fig3.legend()
-# %%
-# max and min
-for i in selxn:
-    fig = i.max_min(
-        lower_lim=0,
-        upper_lim=0.5,
-        target_RE='Ag/AgCl',
-        capac=True)  # lower and upper limit in V
-fig.legend()
+plt.show()
 
+# # %%
+# # charge integration
+# for i in selxn:
+#     fig, fig2, fig3 = i.charge_int(
+#         lower_lim=-0.2, upper_lim=0.2, target_RE='pzc', unit='atomic')
+# fig.legend()
+# fig2.legend()
+# fig3.legend()
+# # %%
+# # max and min
+# for i in selxn:
+#     fig = i.max_min(
+#         lower_lim=0,
+#         upper_lim=0.5,
+#         target_RE='Ag/AgCl',
+#         capac=True)  # lower and upper limit in V
+# fig.legend()
+
+
+# %%
