@@ -126,7 +126,7 @@ class CV_Analyzer_class:
         if atomic:
             # from atoms/Angstrom² to atoms/m²
             norm_factor = atomic_density(
-                self.metal, self.lattice_plane) * 10**20
+                self.metal, self.lattice_plane)
             self.CV_df['j_corr'] = self.CV_df['j'] / constants.e / \
                 norm_factor  # A/m² / C/e- / atoms/m² = e-/(s*atom)
 
