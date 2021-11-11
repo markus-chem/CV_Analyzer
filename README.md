@@ -8,3 +8,4 @@ Different corrections as explained below can be applied.
 - change of the reference electrode
 - integrate the charge in a voltage window
 
+...
