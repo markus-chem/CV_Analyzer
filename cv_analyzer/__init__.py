@@ -358,10 +358,28 @@ class CV_Analyzer:
         return U_shift
 
 
-def filter_db(metal, hkl, component, author_name, not_this_name):
+def filter_db(metal, hkl, component, **kwargs): #author_name, exclude_author):
+    """
+    Inputs
+    kwargs:
+    author_name:    list, list of first authors you wish to include, defaults to
+                    []
+    exclude_author: list, list of authors you wish to exclude, defaults to []
+    """
     from .database import get_database
     files = get_database()
     print(f'{len(files)} files loaded')
+
+    if not isinstance(metal, list):
+        metal = [metal]
+    if not isinstance(hkl, list):
+        hkl = [hkl]
+    hkl = [str(i) for i in hkl]
+    if not isinstance(component, list):
+        component = [component]
+
+    author_name     = kwargs.get("author_name", [])
+    exclude_author  = kwargs.get("exclude_author", [])
 
     selxn = set(CV_Analyzer(Package(i), 0) for i in files)
     for i in selxn.copy():  # iterate over copy, set cannot be changed during iteration
@@ -406,9 +424,9 @@ def filter_db(metal, hkl, component, author_name, not_this_name):
 
         if any(
             i.metadata['source']['bib'].find(
-                not_this_name[j]) != -
+                exclude_author[j]) != -
                 1 for j in range(
-                len(not_this_name))):
+                len(exclude_author))):
             try:
                 selxn.remove(i)
             except BaseException:

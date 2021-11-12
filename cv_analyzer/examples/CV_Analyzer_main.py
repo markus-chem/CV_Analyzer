@@ -1,6 +1,5 @@
 # %%
 import matplotlib.pyplot as plt
-from datapackage import Package
 from cv_analyzer import filter_db
 
 # apply matplotlib style
