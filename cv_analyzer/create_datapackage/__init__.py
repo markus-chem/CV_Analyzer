@@ -1,9 +1,7 @@
 # %%
+import glob, os, shutil
 from create_datapackage_helper import export_datapackage, cv_export
 from pathlib import Path
-import glob
-import shutil
-import os
 
 # %%
 # makes datapackages and saves them as .zip
