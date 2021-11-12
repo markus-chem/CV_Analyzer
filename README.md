@@ -1,5 +1,5 @@
 # CV_Analyzer
-## Analysis of literature Cyclic Voltammograms
+## Analysis of Literature Cyclic Voltammograms
 
 Literature data is digitized using svgdigitizer (echemdb/svgdigitizer) and stored in a database.
 Important information for each CV, such as electrodes, solvent, electrolyte, scan rate and many more are stored as metadata. \\
