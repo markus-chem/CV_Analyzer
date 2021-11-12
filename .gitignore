@@ -1,6 +1,9 @@
 # ignore the following directories
 data/
-*/database/**
+*/database/*.json
+*/database/*.csv
+*/database/*.yaml
+*/database/*.svg
 sorted_out_temp/
 __pycache__/
 *.egg-info/
