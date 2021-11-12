@@ -422,18 +422,6 @@ def filter_db(metal, hkl, component, **kwargs): #author_name, exclude_author):
                 except BaseException:
                     pass
 
-        # if len(author_name) > 0:
-        #     if any(
-        #         i.metadata['source']['bib'].find(
-        #             author_name[j]) == -1 for j in range(
-        #             len(author_name))):
-        #         try:
-        #             selxn.remove(i)
-        #         except BaseException:
-        #             pass
-        #     else:
-        #         pass
-
         if any(
             i.metadata['source']['bib'].find(
                 exclude_author[j]) != -
