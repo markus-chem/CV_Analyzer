@@ -1,0 +1,27 @@
+{
+  "name":     "CV_analyzer",
+  "packages": ["cv_analyzer"],
+  "author":   "Markus Schilling",
+  "author_email": "markus.schilling@tum.de",
+  "description": "Access digitalized experimental Cyclic Voltammogram data",
+  "url":  "",
+  "license": "FHI/TUM",
+  "classifiers": [
+    "Programming Language :: Python",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English"
+  ],
+  "version": "1.0.0",
+  "include_package_data": true,
+  "setup_requires": [
+  ],
+  "python_requires": ">=3.8.0",
+  "install_requires": [
+    "ase",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "scipy",
+    "scikit-learn"
+  ]
+}
