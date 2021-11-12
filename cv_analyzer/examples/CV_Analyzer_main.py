@@ -1,15 +1,10 @@
 # %%
-import glob
 import matplotlib.pyplot as plt
 from datapackage import Package
 from cv_analyzer import filter_db
 
 # apply matplotlib style
 plt.style.use('seaborn-whitegrid')
-
-# list all .json files
-files = glob.glob('../database/*.json')
-print(f'{len(files)} files loaded')
 
 # filter for datapackages
 # empty bracktes mean that no filter is applied
@@ -20,7 +15,6 @@ author_name = []
 not_this_name = ['Rehim']
 
 selxn = filter_db(
-    files,
     metal,
     lattice_plane,
     component,

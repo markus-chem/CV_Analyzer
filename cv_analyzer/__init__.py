@@ -358,7 +358,11 @@ class CV_Analyzer:
         return U_shift
 
 
-def filter_db(files, metal, hkl, component, author_name, not_this_name):
+def filter_db(metal, hkl, component, author_name, not_this_name):
+    from .database import get_database
+    files = get_database()
+    print(f'{len(files)} files loaded')
+
     selxn = set(CV_Analyzer(Package(i), 0) for i in files)
     for i in selxn.copy():  # iterate over copy, set cannot be changed during iteration
         if len(metal) > 0:
