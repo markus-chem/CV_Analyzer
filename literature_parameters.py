@@ -60,10 +60,10 @@ def atomic_density(metal, lattice_plane):
     lattice_plane = str(lattice_plane)
     a = lattice_constants_dict['fcc'][metal]
     if lattice_plane == '100':
-        return (2 / a**2) * 10**20
+        return (2 / a**2) * 10**16 # in atoms/cm²
     if lattice_plane == '110':
-        return math.sqrt(2) / a**2 * 10**20
+        return math.sqrt(2) / a**2 * 10**16 # in atoms/cm²
     if lattice_plane == '111':
-        return 4 / (math.sqrt(3) * a**2) * 10**20
+        return 4 / (math.sqrt(3) * a**2) * 10**16 # in atoms/cm²
     else:
         sys.exit(f'{lattice_plane} not listed')

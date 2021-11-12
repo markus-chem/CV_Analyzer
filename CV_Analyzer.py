@@ -8,11 +8,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
-
 class CV_Analyzer_class:
     def __init__(self, p, resource_no):  # initialize with basic information of package
         self.package = p
         self.CV_df = pd.read_csv(p.resources[0].raw_iter(stream=False))
+        self.CV_df['j'] = self.CV_df['j'] * 100 # change unit from A/m² to µA/cm²
         self.name = p.resource_names[resource_no]  # the name of the resource
         self.metadata = p.descriptor
         self.RE = p.descriptor['electrochemical system']['electrodes']['reference electrode']['type']
@@ -20,8 +20,8 @@ class CV_Analyzer_class:
         self.lattice_plane = p.descriptor['electrochemical system'][
             'electrodes']['working electrode']['crystallographic orientation']
         self.electrolyte_name = [
-            p.descriptor['electrochemical system']['electrolyte']['components'][i]['name'] for i in [
-                0, 3]]  # assumes that there are only 2 components
+            p.descriptor['electrochemical system']['electrolyte']['components'][i]['name']
+                for i in [0, 3]]  # assumes that there are only 2 components
         self.electrolyte_conc = [p.descriptor['electrochemical system'][
             'electrolyte']['components'][i]['concentration']['value'] for i in [0, 3]]
         self.electrolyte_unit = [p.descriptor['electrochemical system'][
@@ -29,18 +29,18 @@ class CV_Analyzer_class:
         self.electrolyte = [
             f'{self.electrolyte_conc[i]} {self.electrolyte_unit[i]} {self.electrolyte_name[i]}' for i in range(2)]
         self.scan_rate_unit = p.descriptor['figure description']['scan rate']['unit']
-        # if self.scan_rate_unit == 'mV / s':
-        #     self.scan_rate = p.descriptor['figure description']['scan rate']['value'] / 1000
         self.scan_rate = p.descriptor['figure description']['scan rate']['value']
         self.T = p.descriptor['electrochemical system']['electrolyte']['temperature']['value']
         self.label = f'{self.metal}({self.lattice_plane}) in {self.electrolyte} at {self.scan_rate} {self.scan_rate_unit}; {self.name}'
+        if self.scan_rate_unit == 'mV / s':
+            self.scan_rate = p.descriptor['figure description']['scan rate']['value'] / 1000
 
     def plot_orig(self):
         # plot the non-manipulated CV data
         fig = plt.figure('Original CV')
         plt.plot(self.CV_df['U'], self.CV_df['j'], label=self.label)
         plt.xlabel(f'U / V vs. [original RE]')
-        plt.ylabel('j / A/m$^2$')
+        plt.ylabel('j / µA/cm$^2$')
 
         return fig
 
@@ -62,14 +62,14 @@ class CV_Analyzer_class:
 
         # current in capacitance
         if capac:
-            self.CV_df['j_corr'] = self.CV_df['j_corr'] / (self.scan_rate / 1000) # scan rate from mV/s to V/s
+            self.CV_df['j_corr'] = self.CV_df['j_corr'] / self.scan_rate # scan rate in V/s
         else:
             pass
 
         # current in atomic units
         if atomic:
             self.CV_df['j_corr'] = self.CV_df['j_corr'] / atomic_density(
-                self.metal, self.lattice_plane)  # A/m² / atoms/m² = A/atom
+                self.metal, self.lattice_plane)  # µA/cm² / atoms/cm² = µA/atom
         else:
             pass
 
@@ -84,13 +84,13 @@ class CV_Analyzer_class:
         plt.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label=self.label)
         plt.xlabel(f'U / V vs. {target_RE}')
         if (capac) & (atomic == False):
-            plt.ylabel('C / F/m$^2$')
+            plt.ylabel('C / µF/cm$^2$')
         elif (capac) & (atomic):
-            plt.ylabel('C / F/atom')
+            plt.ylabel('C / µF/atom')
         elif (capac == False) & (atomic == False):
-            plt.ylabel('j / A/m$^2$')
+            plt.ylabel('j / µA/cm$^2$')
         elif (capac == False) & (atomic == True):
-            plt.ylabel('j / A/atom')
+            plt.ylabel('j / µA/atom')
 
         return fig
 
@@ -124,11 +124,10 @@ class CV_Analyzer_class:
 
         # atomic units
         if atomic:
-            # from atoms/Angstrom² to atoms/m²
             norm_factor = atomic_density(
                 self.metal, self.lattice_plane)
-            self.CV_df['j_corr'] = self.CV_df['j'] / constants.e / \
-                norm_factor  # A/m² / C/e- / atoms/m² = e-/(s*atom)
+            # µA/cm² / µC/e- / atoms/cm² = e-/(s*atom)
+            self.CV_df['j_corr'] = self.CV_df['j'] / constants.e*10**6 / norm_factor
 
         # seperate anodic and cathodic scan, apply voltage limits
         forw_scan = self.CV_df.where(
@@ -162,9 +161,9 @@ class CV_Analyzer_class:
 
         # integrate
         Q_forw_int = [np.trapz(forw_scan_np[:i+1], int_voltage_forw_np[:i+1]) /
-                      (self.scan_rate/1000) for i in range(len(forw_scan_np))]
+                      self.scan_rate for i in range(len(forw_scan_np))]
         Q_backw_int = [np.trapz(backw_scan_np[:i+1], int_voltage_backw_np[:i+1]) /
-                       (self.scan_rate/1000) for i in range(len(backw_scan_np))]
+                       self.scan_rate for i in range(len(backw_scan_np))]
 
         # plot CV with limits
         fig = plt.figure('integrated CV')
@@ -181,7 +180,7 @@ class CV_Analyzer_class:
         if atomic:
             plt.ylabel('j / e-/(s*atom)')
         else:
-            plt.ylabel('j / A/m²')
+            plt.ylabel('j / µA/cm²')
 
         # evaluate Q_forw over voltage and plot
         fig2 = plt.figure('charge integration forward')
@@ -190,7 +189,7 @@ class CV_Analyzer_class:
         if atomic:
             plt.ylabel('Q / e-/atom')
         else:
-            plt.ylabel('Q / C/m²')
+            plt.ylabel('Q / µC/cm²')
 
         # evaluate Q_backw over voltage and plot
         fig3 = plt.figure('charge integration backward')
@@ -199,7 +198,7 @@ class CV_Analyzer_class:
         if atomic:
             plt.ylabel('Q / e-/atom')
         else:
-            plt.ylabel('Q / C/m²')
+            plt.ylabel('Q / µC/cm²')
 
         return fig, fig2, fig3
 
@@ -225,7 +224,7 @@ class CV_Analyzer_class:
 
         # calculate capacitance if needed
         if capac:
-            self.CV_df['j_corr'] = self.CV_df['j_corr'] / (self.scan_rate / 1000)
+            self.CV_df['j_corr'] = self.CV_df['j_corr'] / self.scan_rate
         else:
             pass
 
@@ -238,7 +237,7 @@ class CV_Analyzer_class:
         plt.scatter(max_[0], max_[1], marker='X', color='r')
         plt.scatter(min_[0], min_[1], marker='X', color='r')
         plt.xlabel(f'U / V vs. {target_RE}')
-        plt.ylabel('j / A/m$^2$')
+        plt.ylabel('j / µA/cm$^2$')
 
         print(
             f'Maximum: U = {round(max_[0], 2)}, j = {round(max_[1], 2)} \
@@ -282,8 +281,7 @@ class CV_Analyzer_class:
 
     def conc_corr(self):
         # list of typical halide adsorbates
-        ads_set = {'LiF', 'NaF', 'KF', 'RbF',
-                'LiCl', 'NaCl', 'KCl', 'RbCl', 'CsCl',
+        ads_set = {'LiCl', 'NaCl', 'KCl', 'RbCl', 'CsCl',
                 'LiBr', 'NaBr', 'KBr', 'RbBr', 'CsBr',
                 'LiI', 'NaI', 'KI', 'RbI', 'CsI'
                 }
@@ -320,7 +318,7 @@ def filter_db(
         component,
         author_name,
         not_this_name):
-    selxn = set(CV_Analyzer_class(Package(i), 0) for i in files)
+    selxn = set(CV_Analyzer_class(Package(i), 0) for i in files) # avoid duplicates
     for i in selxn.copy():  # iterate over copy, set cannot be changed during iteration
         if len(metal) > 0:
             if i.metadata['electrochemical system']['electrodes']['working electrode']['material'] not in metal:
@@ -339,33 +337,45 @@ def filter_db(
                     pass
             else:
                 pass
-
+        
         if len(component) > 0:
-            l = list(set(component).intersection(
+            # join to one string and check if actual components and experimental component match
+            component_filter = component
+            component_exp = ''.join(filter(None,
                 [i.metadata['electrochemical system']['electrolyte']['components'][j]['name'] for j in range(4)]))
-            if len(l) == 0:
+            # remove element if none of the filter criteria matches
+            if any(component_filter[k] in component_exp for k in range(len(component_filter))) == False:
                 try:
                     selxn.remove(i)
                 except BaseException:
                     pass
 
         if len(author_name) > 0:
-            if any(
-                i.metadata['source']['bib'].find(
-                    author_name[j]) == -1 for j in range(
-                    len(author_name))):
+            # join to one string and check for matches
+            author_name_filter = author_name
+            author_name_exp = i.metadata['source']['bib'].split('_')[0] # author is string before 1st '_'
+            # remove element if none of the filter criteria matches
+            if any(author_name_filter[k] in author_name_exp for k in range(len(author_name_filter))) == False:
                 try:
                     selxn.remove(i)
                 except BaseException:
                     pass
-            else:
-                pass
+
+        # if len(author_name) > 0:
+        #     if any(
+        #         i.metadata['source']['bib'].find(
+        #             author_name[j]) == -1 for j in range(
+        #             len(author_name))):
+        #         try:
+        #             selxn.remove(i)
+        #         except BaseException:
+        #             pass
+        #     else:
+        #         pass
 
         if any(
-            i.metadata['source']['bib'].find(
-                not_this_name[j]) != -
-                1 for j in range(
-                len(not_this_name))):
+            i.metadata['source']['bib'].find(not_this_name[j]) 
+                != -1 for j in range(len(not_this_name))):
             try:
                 selxn.remove(i)
             except BaseException:
@@ -385,7 +395,7 @@ def get_exp_CV_data(sel_obj, target_RE='SHE',
                     atomic=False,
                     conc_corr=False):
 
-    # object is one element of selxn, i.e. a CV_Analyzer object
+    # object is one element of selection (selxn), i.e. a CV_Analyzer object
     # returns U and j as array
 
     # extra columns for corrections
@@ -397,7 +407,7 @@ def get_exp_CV_data(sel_obj, target_RE='SHE',
 
     # current in capacitance
     if capac:
-        sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j_corr'] / (sel_obj.scan_rate / 1000) # scan rate from mV/s to V/s
+        sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j_corr'] / sel_obj.scan_rate # scan rate in V/s
     else:
         pass
 
