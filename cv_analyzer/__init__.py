@@ -423,39 +423,51 @@ def filter_db(metal, hkl, component, author_name, not_this_name):
 
     return list(selxn)
 
-def get_exp_CV_data(sel_obj, target_RE='SHE',
-                    C_exp=False,
-                    atomic=False,
+def get_exp_CV_data(sel_obj, target_RE='SHE', C_exp=False, atomic=False,
                     c_corr=False):
-
-    # object is one element of selxn, i.e. a CV_Analyzer object
-    # returns U and j as array
-
+    """
+    This function takes a selection of experimental data and returns the
+    corrected applied potential and current (or pseudocapacitance)
+    Inputs:
+    sel_obj:    CV_Analyzer class, the experimental selection
+    target_RE:  str, name of the reference electrode to which you want to shift
+                the potential.
+    C_exp:      bool, decides whether to translate the measured current to the
+                pseudocapacitance. This requires knowledge on the scan rate.
+    atomic:     bool, norms all the data to number of atoms, instead of on the
+                area.
+    c_corr:     bool, if True, includes a Nernstian shift depending on the
+                electrolyte concentrations.
+    Returns:
+    U:  np.array, the applied potential as a 1-d array
+    j:  np.array, the measured current (or pseudocapacitance) as a 1-d array
+    """
     # extra columns for corrections
     sel_obj.CV_df['U_corr'] = sel_obj.CV_df['U']
     sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j']
 
     # reference correction
-    sel_obj.CV_df['U_corr'] = sel_obj.CV_df['U_corr'] - sel_obj.ref_to(target_RE)
+    ref_shift = sel_obj.ref_to(target_RE)
+    sel_obj.CV_df['U_corr'] = sel_obj.CV_df['U_corr'] - ref_shift
 
-    # current in C_expitance
+    # current in capacitance
+
     if C_exp:
-        sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j_corr'] / (sel_obj.scan_rate / 1000) # scan rate from mV/s to V/s
-    else:
-        pass
+        scu = sel_obj.scan_rate_unit
+        sc  = sel_obj.scan_rate
+        if 'mV' in scu:
+            # scan rate from mV/s to V/s
+            sc /= 1000.
+        sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j_corr'] / sc
 
-    # current in atomic units
+    # current in atomic units: A/m² / atoms/m² = A/atom
     if atomic:
-        sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j_corr'] / atomic_density(
-            sel_obj.metal, sel_obj.hkl)  # A/m² / atoms/m² = A/atom
-    else:
-        pass
+        rho_atomic = atomic_density(sel_obj.metal, sel_obj.hkl)
+        sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j_corr'] / rho_atomic
 
     # apply concentration correction
     if c_corr:
         sel_obj.CV_df['U_corr'] = sel_obj.CV_df['U_corr'] - sel_obj.c_corr()
-    else:
-        pass
 
     U = sel_obj.CV_df['U_corr'].to_numpy()
     j = sel_obj.CV_df['j_corr'].to_numpy()
