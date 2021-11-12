@@ -1,5 +1,8 @@
 # ignore the following directories
-/data
-/database
-/sorted_out_temp
-/__pycache__
+data/
+database/*
+sorted_out_temp/
+__pycache__/
+*.egg-info/
+*.pyc
+.ipynb_checkpoints/

@@ -1,57 +1,95 @@
 # CV_Analyzer class for datapackages
 # for the analysis and the manipulation of digitized CVs
 
-from literature_parameters import RE_dict, pzc_dict, lattice_constants_dict, atomic_density
-from datapackage import Package
-from scipy import constants
 import matplotlib.pyplot as plt
-import pandas as pd
 import numpy as np
+import pandas as pd
+
+from datapackage import Package
+from ._literature_params import (RE_dict, pzc_dict, lattice_constants_dict,
+                                   atomic_density)
+from scipy import constants
+
+colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+class CV_Analyzer:
+    def __init__(self, package, resource_no):
+        """
+        Initialize with basic information of package defined by the datapackage
+        module implemented in ### REFERENCE!!!!
+        Inputs:
+        package:        Package, ### REFERENCE!!!!
+        resource_no:    str, name of the resource which you want to access
+                        within the larger datapackage
+        """
+        self.package = package
+        self.CV_df = pd.read_csv(package.resources[0].raw_iter(stream=False))
+        self.name = package.resource_names[resource_no]
+        self._get_inputs()
 
 
-class CV_Analyzer_class:
-    def __init__(self, p, resource_no):  # initialize with basic information of package
-        self.package = p
-        self.CV_df = pd.read_csv(p.resources[0].raw_iter(stream=False))
-        self.name = p.resource_names[resource_no]  # the name of the resource
-        self.metadata = p.descriptor
-        self.RE = p.descriptor['electrochemical system']['electrodes']['reference electrode']['type']
-        self.metal = p.descriptor['electrochemical system']['electrodes']['working electrode']['material']
-        self.lattice_plane = p.descriptor['electrochemical system'][
-            'electrodes']['working electrode']['crystallographic orientation']
-        self.electrolyte_name = [
-            p.descriptor['electrochemical system']['electrolyte']['components'][i]['name'] for i in [
-                0, 3]]  # assumes that there are only 2 components
-        self.electrolyte_conc = [p.descriptor['electrochemical system'][
-            'electrolyte']['components'][i]['concentration']['value'] for i in [0, 3]]
-        self.electrolyte_unit = [p.descriptor['electrochemical system'][
-            'electrolyte']['components'][i]['concentration']['unit'] for i in [0, 3]]
-        self.electrolyte = [
-            f'{self.electrolyte_conc[i]} {self.electrolyte_unit[i]} {self.electrolyte_name[i]}' for i in range(2)]
-        self.scan_rate_unit = p.descriptor['figure description']['scan rate']['unit']
-        # if self.scan_rate_unit == 'mV / s':
-        #     self.scan_rate = p.descriptor['figure description']['scan rate']['value'] / 1000
-        self.scan_rate = p.descriptor['figure description']['scan rate']['value']
-        self.T = p.descriptor['electrochemical system']['electrolyte']['temperature']['value']
-        self.label = f'{self.metal}({self.lattice_plane}) in {self.electrolyte} at {self.scan_rate} {self.scan_rate_unit}; {self.name}'
+    def _get_inputs(self):
+        """
+        Collects the experimental information from the package information.
+        """
+        metadata    = self.package.descriptor
+        e_chem_sys  = metadata['electrochemical system']
+
+        electrodes  = e_chem_sys['electrodes']
+        self.RE     = electrodes['reference electrode']['type']
+        work_elec   = electrodes['working electrode']
+        self.metal  = work_elec['material']
+        self.hkl    = work_elec['crystallographic orientation']
+
+        # Assuming there are only 2 components
+        electrolyte = e_chem_sys['electrolyte']
+        elec_comps  = electrolyte['components']
+        self.electrolyte_name   = [elec_comps[i]['name'] for i in [0, 3]]
+        self.c_electrolyte      = [
+            elec_comps[i]['concentration']['value'] for i in [0, 3]
+        ]
+        self.electrolyte_unit   = [
+            elec_comps[i]['concentration']['unit'] for i in [0, 3]
+        ]
+        self.electrolyte        = [
+            "{} {} {}".format(self.c_electrolyte[i], self.electrolyte_unit[i],
+                              self.electrolyte_name[i]
+                             ) for i in range(2)
+        ]
+        self.T                  = electrolyte['temperature']['value']
+        self.pH                 = electrolyte['ph'].get('value', None)
+
+        fig_desc = metadata['figure description']
+        self.scan_rate_unit = fig_desc['scan rate']['unit']
+        self.scan_rate = fig_desc['scan rate']['value']
+
+        self.label = "{}({}) in {} at {} {}; {}".format(
+            self.metal, self.hkl, self.electrolyte, self.scan_rate,
+            self.scan_rate_unit, self.name
+        )
+        self.metadata = metadata
+        return None
 
     def plot_orig(self):
-        # plot the non-manipulated CV data
-        fig = plt.figure('Original CV')
-        plt.plot(self.CV_df['U'], self.CV_df['j'], label=self.label)
-        plt.xlabel(f'U / V vs. [original RE]')
-        plt.ylabel('j / A/m$^2$')
-
+        """
+        Recreate the cyclic voltammogram with the original experimental
+        parameters.
+        """
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.set_xlabel("V vs. {} (eV)".format(self.RE))
+        ax.set_ylabel(r"$\rm j A/m^2")
+        ax.plot(self.CV_df['U'], self.CV_df['j'], label=self.label,
+                color=colors[0]
+        )
         return fig
 
-    def plot(
-            self,
-            target_RE='SHE',
-            capac=False,
-            atomic=False,
-            conc_corr=False):
-
-        settings = f'capac={capac}, atomic={atomic}, conc_corr={conc_corr}'
+    def plot(self, target_RE='SHE', C_exp=False, atomic=False, c_corr=False):
+        """
+        Plots the cyclic voltammogram, however permits changes such as Nernstian
+        shifts, or changes to the reference electrode
+        """
+        settings = f'C_exp={C_exp}, atomic={atomic}, c_corr={c_corr}'
 
         # extra columns for corrections
         self.CV_df['U_corr'] = self.CV_df['U']
@@ -60,37 +98,37 @@ class CV_Analyzer_class:
         # reference correction
         self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.ref_to(target_RE)
 
-        # current in capacitance
-        if capac:
-            self.CV_df['j_corr'] = self.CV_df['j_corr'] / (self.scan_rate / 1000) # scan rate from mV/s to V/s
-        else:
-            pass
+        # current to capacitance
+        if C_exp:
+            scu = self.scan_rate_unit
+            if 'mV' in scu:
+                sc = self.scan_rate / 1000
+                self.CV_df['j_corr'] = self.CV_df['j_corr'] / sc
+            else:
+                self.CV_df['j_corr'] = self.CV_df['j_corr'] / self.scan_rate
 
-        # current in atomic units
+        # current in atomic units: A/m² / atoms/m² = A/atom
         if atomic:
-            self.CV_df['j_corr'] = self.CV_df['j_corr'] / atomic_density(
-                self.metal, self.lattice_plane)  # A/m² / atoms/m² = A/atom
-        else:
-            pass
+            rho_atomic = atomic_density(self.metal, self.hkl)
+            self.CV_df['j_corr'] = self.CV_df['j_corr'] / rho_atomic
 
         # apply concentration correction
-        if conc_corr:
-            self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.conc_corr()
-        else:
-            pass
+        if c_corr:
+            self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.c_corr()
 
         # plot
         fig = plt.figure(f'CV_settings: {settings}')
-        plt.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label=self.label)
-        plt.xlabel(f'U / V vs. {target_RE}')
-        if (capac) & (atomic == False):
-            plt.ylabel('C / F/m$^2$')
-        elif (capac) & (atomic):
-            plt.ylabel('C / F/atom')
-        elif (capac == False) & (atomic == False):
-            plt.ylabel('j / A/m$^2$')
-        elif (capac == False) & (atomic == True):
-            plt.ylabel('j / A/atom')
+        ax  = fig.add_subplot(111)
+        ax.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label=self.label)
+        ax.set_xlabel(f'U / V vs. {target_RE}')
+        if (C_exp) & (atomic == False):
+            ax.set_ylabel('C / F/m$^2$')
+        elif (C_exp) & (atomic):
+            ax.set_ylabel('C / F/atom')
+        elif (C_exp == False) & (atomic == False):
+            ax.set_ylabel('j / A/m$^2$')
+        elif (C_exp == False) & (atomic == True):
+            ax.set_ylabel('j / A/atom')
 
         return fig
 
@@ -100,7 +138,7 @@ class CV_Analyzer_class:
             upper_lim,
             target_RE,
             atomic=False,
-            conc_corr=False):
+            c_corr=False):
 
         # extra columns for corrections
         self.CV_df['U_corr'] = self.CV_df['U']
@@ -117,8 +155,8 @@ class CV_Analyzer_class:
             raise ValueError(f'Voltage limits out of range for {self.name}')
 
         # apply concentration correction
-        if conc_corr:
-            self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.conc_corr()
+        if c_corr:
+            self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.c_corr()
         else:
             pass
 
@@ -126,7 +164,7 @@ class CV_Analyzer_class:
         if atomic:
             # from atoms/Angstrom² to atoms/m²
             norm_factor = atomic_density(
-                self.metal, self.lattice_plane) * 10**20
+                self.metal, self.hkl) * 10**20
             self.CV_df['j_corr'] = self.CV_df['j'] / constants.e / \
                 norm_factor  # A/m² / C/e- / atoms/m² = e-/(s*atom)
 
@@ -203,7 +241,7 @@ class CV_Analyzer_class:
 
         return fig, fig2, fig3
 
-    def max_min(self, lower_lim, upper_lim, target_RE, capac=False):
+    def max_min(self, lower_lim, upper_lim, target_RE, C_exp=False):
 
         # extra columns for corrections
         self.CV_df['U_corr'] = self.CV_df['U']
@@ -217,14 +255,14 @@ class CV_Analyzer_class:
                 self.CV_df['U_corr']) or upper_lim > max(
                 self.CV_df['U_corr']):
             raise ValueError(f'Voltage limits out of range for {self.name}')
-        
+
         # apply voltage limits
         self.CV_df = self.CV_df.where(
                 (self.CV_df['U_corr'] > lower_lim) &
                 (self.CV_df['U_corr'] < upper_lim))
 
-        # calculate capacitance if needed
-        if capac:
+        # calculate C_expitance if needed
+        if C_exp:
             self.CV_df['j_corr'] = self.CV_df['j_corr'] / (self.scan_rate / 1000)
         else:
             pass
@@ -249,38 +287,48 @@ class CV_Analyzer_class:
 
 
     def ref_to(self, target_RE):
-        # reference to another RE
-
+        """
+        Switches the reference electrode to one of the options included in the
+        RE dictionary.
+        Inputs:
+        target_RE:  str, name of the target reference electrode
+        Output:
+        offset:     float, Potential shift due to reference change.
+        """
         # check if target_RE exists
-        if target_RE in RE_dict or target_RE == 'pzc' or target_RE == 'RHE':
-            pass
-        else:
-            print('Select one of the following RE')
-            print('pzc')
-            for key in RE_dict:
-                print(key)
-            raise ValueError('target reference is unknown')
+        RE_keys = list(RE_dict.keys()) + ['pzc', 'RHE']
+        if target_RE not in RE_keys:
+            s = "Target reference is unknown, select one of the following: "
+            s += ', '.join(RE_keys)
+            raise ValueError(s)
 
         # check for pH dependency
-        if target_RE == 'RHE':
-            pH = self.metadata['electrochemical system']['electrolyte']['ph']['value']
-            if pH is None:
-                # try to calculate pH?
-                raise ValueError('No pH value given. Conversion to RHE not possible.')
+        elif target_RE == 'RHE':
+            if self.pH is None:
+                raise ValueError('pH value is undefined, RHE not possible.')
             else:
                 # offset is later substracted from the voltage
-                offset = RE_dict[str(target_RE)] - RE_dict[str(self.RE)] + constants.R * \
-                    self.T / constants.value('Faraday constant') * pH  # 59 mV shift per pH unit
-        if target_RE == 'pzc':
-            offset = pzc_dict[self.metal][self.lattice_plane] - \
-                RE_dict[str(self.RE)] - RE_dict['U_abs']
+                R, F =  constants.R, constants.value('Faraday constant')
+                offset = RE_dict[str(target_RE)] - RE_dict[str(self.RE)]
+                # Includes the 59 mV shift per pH unit
+                offset += R * self.T / F * pH
+
+        # Sets the potential of zero charge as the reference.
+        elif target_RE == 'pzc':
+            pzc = pzc_dict[self.metal][self.hkl]
+            offset =  pzc - RE_dict[str(self.RE)] - RE_dict['U_abs']
         else:
             offset = RE_dict[str(target_RE)] - RE_dict[str(self.RE)]
-
         return offset
 
 
-    def conc_corr(self):
+    def c_corr(self):
+        """
+        Performs a Nernstian shift to shift the concentration to the proper
+        potential.
+        Returns:
+        U_shift: float, the nernstian potential shift that is substracted
+        """
         # list of typical halide adsorbates
         ads_set = {'LiF', 'NaF', 'KF', 'RbF',
                 'LiCl', 'NaCl', 'KCl', 'RbCl', 'CsCl',
@@ -294,33 +342,24 @@ class CV_Analyzer_class:
             raise ValueError('No halide adsorbate found')
         elif len(ads) > 1:
             raise ValueError(f'Cannot handle more than one adsorbate: {ads}')
-        else:
-            idx = self.electrolyte_name.index(str(ads[0]))
-            ads_conc = self.electrolyte_conc[idx]
-            unit = self.electrolyte_unit[idx]
 
-            if str(unit) == 'uM':
-                ads_conc = ads_conc / 10**6
-            elif str(unit) == 'mM':
-                ads_conc = ads_conc / 1000
-            elif str(unit) == 'M':
-                pass
-            else:
-                raise ValueError(f'Unit Error: {unit}')
-            U_shift = - constants.R * self.T / \
-                constants.value('Faraday constant') * np.log(ads_conc)
+        idx = self.electrolyte_name.index(str(ads[0]))
+        ads_conc = self.c_electrolyte[idx]
+        unit = self.electrolyte_unit[idx]
 
-        return U_shift  # is later substracted
+        if str(unit) == 'uM':
+            ads_conc = ads_conc / 1.e06
+        elif str(unit) == 'mM':
+            ads_conc = ads_conc / 1.e03
+        elif str(unit) != 'M':
+            raise ValueError(f'Unit Error: {unit}')
+        R, F = constants.R, constants.value('Faraday constant')
+        U_shift = - (R * self.T / F) * np.log(ads_conc)
+        return U_shift
 
 
-def filter_db(
-        files,
-        metal,
-        lattice_plane,
-        component,
-        author_name,
-        not_this_name):
-    selxn = set(CV_Analyzer_class(Package(i), 0) for i in files)
+def filter_db(files, metal, hkl, component, author_name, not_this_name):
+    selxn = set(CV_Analyzer(Package(i), 0) for i in files)
     for i in selxn.copy():  # iterate over copy, set cannot be changed during iteration
         if len(metal) > 0:
             if i.metadata['electrochemical system']['electrodes']['working electrode']['material'] not in metal:
@@ -331,8 +370,8 @@ def filter_db(
             else:
                 pass
 
-        if len(lattice_plane) > 0:
-            if i.metadata['electrochemical system']['electrodes']['working electrode']['crystallographic orientation'] not in lattice_plane:
+        if len(hkl) > 0:
+            if i.metadata['electrochemical system']['electrodes']['working electrode']['crystallographic orientation'] not in hkl:
                 try:
                     selxn.remove(i)
                 except BaseException:
@@ -381,9 +420,9 @@ def filter_db(
     return list(selxn)
 
 def get_exp_CV_data(sel_obj, target_RE='SHE',
-                    capac=False,
+                    C_exp=False,
                     atomic=False,
-                    conc_corr=False):
+                    c_corr=False):
 
     # object is one element of selxn, i.e. a CV_Analyzer object
     # returns U and j as array
@@ -395,8 +434,8 @@ def get_exp_CV_data(sel_obj, target_RE='SHE',
     # reference correction
     sel_obj.CV_df['U_corr'] = sel_obj.CV_df['U_corr'] - sel_obj.ref_to(target_RE)
 
-    # current in capacitance
-    if capac:
+    # current in C_expitance
+    if C_exp:
         sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j_corr'] / (sel_obj.scan_rate / 1000) # scan rate from mV/s to V/s
     else:
         pass
@@ -404,13 +443,13 @@ def get_exp_CV_data(sel_obj, target_RE='SHE',
     # current in atomic units
     if atomic:
         sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j_corr'] / atomic_density(
-            sel_obj.metal, sel_obj.lattice_plane)  # A/m² / atoms/m² = A/atom
+            sel_obj.metal, sel_obj.hkl)  # A/m² / atoms/m² = A/atom
     else:
         pass
 
     # apply concentration correction
-    if conc_corr:
-        sel_obj.CV_df['U_corr'] = sel_obj.CV_df['U_corr'] - sel_obj.conc_corr()
+    if c_corr:
+        sel_obj.CV_df['U_corr'] = sel_obj.CV_df['U_corr'] - sel_obj.c_corr()
     else:
         pass
 

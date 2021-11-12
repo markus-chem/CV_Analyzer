@@ -2,20 +2,20 @@
 import glob
 import matplotlib.pyplot as plt
 from datapackage import Package
-from CV_Analyzer import CV_Analyzer_class, filter_db
+from cv_analyzer import filter_db
 
 # apply matplotlib style
 plt.style.use('seaborn-whitegrid')
 
 # list all .json files
-files = glob.glob('database/*.json')
+files = glob.glob('../database/*.json')
 print(f'{len(files)} files loaded')
 
 # filter for datapackages
 # empty bracktes mean that no filter is applied
 metal = ['Ag']
 lattice_plane = []
-component = ['NaOH']
+component = ['KBr']
 author_name = []
 not_this_name = ['Rehim']
 
@@ -30,7 +30,7 @@ selxn = filter_db(
 # %%
 # generic plot
 for i in selxn:
-    fig = i.plot(target_RE='pzc', capac=False, atomic=False, conc_corr=False)
+    fig = i.plot(target_RE='pzc', C_exp=False, atomic=False, c_corr=False)
 fig.legend()
 plt.show()
 
