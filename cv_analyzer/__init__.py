@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import os, glob, shutil
+import math
 
 import cv_analyzer
 from datapackage import Package
@@ -55,6 +56,7 @@ class CV_Analyzer:
         self.electrolyte_unit   = [
             elec_comps[i]['concentration']['unit'] for i in [0, 3]
         ]
+
         self.electrolyte        = [
             "{} {} {}".format(self.c_electrolyte[i], self.electrolyte_unit[i],
                               self.electrolyte_name[i]
@@ -62,7 +64,6 @@ class CV_Analyzer:
         ]
         self.T                  = electrolyte['temperature']['value']
         self.pH                 = electrolyte['ph'].get('value', None)
-        # try to calculate pH based on acid or base components
 
         fig_desc = metadata['figure description']
         self.scan_rate_unit = fig_desc['scan rate']['unit']
@@ -98,7 +99,7 @@ class CV_Analyzer:
         Plots the cyclic voltammogram, however permits changes such as Nernstian
         shifts, or changes to the reference electrode
         """
-        settings = f'C_exp={C_exp}, atomic={atomic}, c_corr={c_corr}'
+        settings = f'C_exp={C_exp}, atomic={atomic}, c_corr={c_corr}, target_RE={target_RE}'
 
         # extra columns for corrections
         self.CV_df['U_corr'] = self.CV_df['U']
@@ -300,25 +301,30 @@ class CV_Analyzer:
             s = "Target reference is unknown, select one of the following: "
             s += ', '.join(RE_keys)
             raise ValueError(s)
+        
+        # try to calculate pH based on acid or base components
+        if self.pH == None:
+            self.pH = self.calc_pH()
 
         # pH is needed for calculation with RHE
         if 'RHE' in [self.RE, target_RE]:
             if self.pH == None:
-                raise ValueError('pH value is undefined, RHE not possible.')
+                raise ValueError(f'pH value is undefined, RHE not possible ({self.name})')
+
+        # pH shift per decade H+ concentration
+        R, F =  constants.R, constants.value('Faraday constant')
+        pH_p_dec = R * self.T / F * math.log(10)
 
         # corrections for the original RE
-        R, F =  constants.R, constants.value('Faraday constant')
         if self.RE == 'RHE':
-            offset = - R * self.T / F * self.pH
+            offset = pH_p_dec * self.pH
         else:
             offset = - RE_dict[str(self.RE)]
 
         # correction for the target RE
         if target_RE == 'RHE':
-            # offset is later substracted from the voltage
-            offset += RE_dict[str(target_RE)]
             # Add the 59 mV shift per pH unit
-            offset += R * self.T / F * self.pH
+            offset -= pH_p_dec * self.pH
 
         # Sets the potential of zero charge as the reference.
         elif target_RE == 'pzc':
@@ -364,6 +370,44 @@ class CV_Analyzer:
         U_shift = - (R * self.T / F) * np.log(ads_conc)
         return U_shift
 
+    def calc_pH(self):
+        # calculate the pH based on the components
+
+        acids_1H = [
+            'HCl', 'HClO4', 
+        ]
+
+        acids_2H = [
+            'H2SO4'
+        ]
+
+        base_1 = [
+            'LiOH', 'NaOH', 'KOH', 'CsOH'
+        ]
+
+        base_2 = [
+            'MgOH2', 'CaOH2'
+        ]
+
+
+        for idx, i in enumerate(self.electrolyte_name):
+            # change units to mol/L
+            # assuming that only 'M' and 'mM' are used
+            if self.electrolyte_unit[idx] == 'mM':
+                self.c_electrolyte[idx] = self.c_electrolyte[idx] / 1000
+                self.electrolyte_unit[idx] = 'M'
+            if i in acids_1H:
+                pH = - math.log(self.c_electrolyte[idx]) # concentration in mol/L
+            elif i in acids_2H:
+                pH = - math.log(2 * self.c_electrolyte[idx])
+            elif i in base_1:
+                pH = 14 + math.log(self.c_electrolyte[idx])
+            elif i in base_2:
+                pH = 14 + math.log(2 * self.c_electrolyte[idx])
+            else:
+                print('pH not given \npH could not be calculated')
+        
+        return pH
 
 def filter_db(metal, hkl, component, **kwargs): #author_name, exclude_author):
     """
@@ -501,7 +545,7 @@ def get_exp_CV_data(sel_obj, target_RE='SHE', C_exp=False, atomic=False,
 
     return U, j
 
-def create_datapackage(sampling_interval=0.05):
+def create_datapackage(sampling_interval=0.005):
     '''
     Find all .yaml and .svg files in 'data' folder.
     Export them as datapackage into 'database'
@@ -530,4 +574,5 @@ def create_datapackage(sampling_interval=0.05):
         for j in ['.csv', '.yaml', '.svg', '.json']:
             shutil.move(name_list[i] + j,
                 os.path.join(path0, 'database', name_list[i] + j))
+
 
