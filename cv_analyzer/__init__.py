@@ -4,13 +4,17 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import os, glob, shutil
 
+import cv_analyzer
 from datapackage import Package
+from ._helpers import export_datapackage
 from ._literature_params import (RE_dict, pzc_dict, lattice_constants_dict,
                                    atomic_density)
 from scipy import constants
+from pathlib import Path
 
-colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+# colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
 class CV_Analyzer:
     def __init__(self, package, resource_no):
@@ -24,9 +28,9 @@ class CV_Analyzer:
         """
         self.package = package
         self.CV_df = pd.read_csv(package.resources[0].raw_iter(stream=False))
+        self.CV_df['j'] = self.CV_df['j'] * 100 # change unit from A/m² to µA/cm²
         self.name = package.resource_names[resource_no]
         self._get_inputs()
-
 
     def _get_inputs(self):
         """
@@ -58,16 +62,23 @@ class CV_Analyzer:
         ]
         self.T                  = electrolyte['temperature']['value']
         self.pH                 = electrolyte['ph'].get('value', None)
+        # try to calculate pH based on acid or base components
 
         fig_desc = metadata['figure description']
         self.scan_rate_unit = fig_desc['scan rate']['unit']
         self.scan_rate = fig_desc['scan rate']['value']
+
+        # change scan rate to V / s if necessary
+        if 'mV' in self.scan_rate_unit:
+            self.scan_rate = self.scan_rate / 1000
+            self.scan_rate_unit = 'V / s'
 
         self.label = "{}({}) in {} at {} {}; {}".format(
             self.metal, self.hkl, self.electrolyte, self.scan_rate,
             self.scan_rate_unit, self.name
         )
         self.metadata = metadata
+
         return None
 
     def plot_orig(self):
@@ -75,13 +86,11 @@ class CV_Analyzer:
         Recreate the cyclic voltammogram with the original experimental
         parameters.
         """
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.set_xlabel("V vs. {} (eV)".format(self.RE))
-        ax.set_ylabel(r"$\rm j A/m^2")
-        ax.plot(self.CV_df['U'], self.CV_df['j'], label=self.label,
-                color=colors[0]
-        )
+        fig = plt.figure('Original CV')
+        plt.plot(self.CV_df['U'], self.CV_df['j'], label=self.label)
+        plt.xlabel(f'U / V vs. [original RE]')
+        plt.ylabel('j / µA/cm$^2$')
+
         return fig
 
     def plot(self, target_RE='SHE', C_exp=False, atomic=False, c_corr=False):
@@ -100,11 +109,6 @@ class CV_Analyzer:
 
         # current to capacitance
         if C_exp:
-            scu = self.scan_rate_unit
-            if 'mV' in scu:
-                sc = self.scan_rate / 1000
-                self.CV_df['j_corr'] = self.CV_df['j_corr'] / sc
-            else:
                 self.CV_df['j_corr'] = self.CV_df['j_corr'] / self.scan_rate
 
         # current in atomic units: A/m² / atoms/m² = A/atom
@@ -118,17 +122,16 @@ class CV_Analyzer:
 
         # plot
         fig = plt.figure(f'CV_settings: {settings}')
-        ax  = fig.add_subplot(111)
-        ax.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label=self.label)
-        ax.set_xlabel(f'U / V vs. {target_RE}')
+        plt.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label=self.label)
+        plt.xlabel(f'U / V vs. {target_RE}')
         if (C_exp) & (atomic == False):
-            ax.set_ylabel('C / F/m$^2$')
+            plt.ylabel('C / µF/cm$^2$')
         elif (C_exp) & (atomic):
-            ax.set_ylabel('C / F/atom')
+            plt.ylabel('C / µF/atom')
         elif (C_exp == False) & (atomic == False):
-            ax.set_ylabel('j / A/m$^2$')
+            plt.ylabel('j / µA/cm$^2$')
         elif (C_exp == False) & (atomic == True):
-            ax.set_ylabel('j / A/atom')
+            plt.ylabel('j / µA/atom')
 
         return fig
 
@@ -145,8 +148,7 @@ class CV_Analyzer:
         self.CV_df['j_corr'] = self.CV_df['j']
 
         # reference to target_RE
-        self.CV_df['U_corr'] = self.CV_df['U'] - \
-            self.ref_to(target_RE)  # reference to another RE
+        self.CV_df['U_corr'] = self.CV_df['U'] - self.ref_to(target_RE)
 
         # check voltage limits
         if lower_lim < min(
@@ -163,8 +165,8 @@ class CV_Analyzer:
         # atomic units
         if atomic:
             norm_factor = atomic_density(
-                self.metal, self.hkl) * 10**20
-            self.CV_df['j_corr'] = self.CV_df['j'] / constants.e / \
+                self.metal, self.hkl)
+            self.CV_df['j_corr'] = self.CV_df['j_corr'] / constants.e / \
                 norm_factor  # A/m² / C/e- / atoms/m² = e-/(s*atom)
 
         # seperate anodic and cathodic scan, apply voltage limits
@@ -260,11 +262,9 @@ class CV_Analyzer:
                 (self.CV_df['U_corr'] > lower_lim) &
                 (self.CV_df['U_corr'] < upper_lim))
 
-        # calculate C_expitance if needed
+        # current to capacitance
         if C_exp:
-            self.CV_df['j_corr'] = self.CV_df['j_corr'] / (self.scan_rate / 1000)
-        else:
-            pass
+                self.CV_df['j_corr'] = self.CV_df['j_corr'] / self.scan_rate
 
         idx = (self.CV_df['j_corr'].idxmax(), self.CV_df['j_corr'].idxmin()) # indices of min and max
         max_ = (self.CV_df.iloc[idx[0]]['U_corr'], self.CV_df.iloc[idx[0]]['j_corr'])  # x and y of max
@@ -301,23 +301,32 @@ class CV_Analyzer:
             s += ', '.join(RE_keys)
             raise ValueError(s)
 
-        # check for pH dependency
-        elif target_RE == 'RHE':
-            if self.pH is None:
+        # pH is needed for calculation with RHE
+        if 'RHE' in [self.RE, target_RE]:
+            if self.pH == None:
                 raise ValueError('pH value is undefined, RHE not possible.')
-            else:
-                # offset is later substracted from the voltage
-                R, F =  constants.R, constants.value('Faraday constant')
-                offset = RE_dict[str(target_RE)] - RE_dict[str(self.RE)]
-                # Includes the 59 mV shift per pH unit
-                offset += R * self.T / F * self.pH
+
+        # corrections for the original RE
+        R, F =  constants.R, constants.value('Faraday constant')
+        if self.RE == 'RHE':
+            offset = - R * self.T / F * self.pH
+        else:
+            offset = - RE_dict[str(self.RE)]
+
+        # correction for the target RE
+        if target_RE == 'RHE':
+            # offset is later substracted from the voltage
+            offset += RE_dict[str(target_RE)]
+            # Add the 59 mV shift per pH unit
+            offset += R * self.T / F * self.pH
 
         # Sets the potential of zero charge as the reference.
         elif target_RE == 'pzc':
             pzc = pzc_dict[self.metal][self.hkl]
-            offset =  pzc - RE_dict[str(self.RE)] - RE_dict['U_abs']
+            offset +=  pzc - RE_dict['U_abs']
         else:
-            offset = RE_dict[str(target_RE)] - RE_dict[str(self.RE)]
+            offset += RE_dict[str(target_RE)]
+
         return offset
 
 
@@ -491,3 +500,34 @@ def get_exp_CV_data(sel_obj, target_RE='SHE', C_exp=False, atomic=False,
     j = sel_obj.CV_df['j_corr'].to_numpy()
 
     return U, j
+
+def create_datapackage(sampling_interval=0.05):
+    '''
+    Find all .yaml and .svg files in 'data' folder.
+    Export them as datapackage into 'database'
+    Database will contain .csv .yaml .svg and .json for each CV
+    '''
+    path0 = cv_analyzer.__path__[0] # base path of the package
+    yaml_list = []
+    svg_list = []
+    name_list = []
+    for path in Path(path0,'data').rglob('*.yaml'):
+        yaml_list.append(path)
+        svg_list.append(path.with_suffix('.svg'))
+        name_list.append(str(path.stem))
+    n = len(yaml_list)
+    print(f'Found .yaml files: \n{yaml_list}')
+
+    sampling_interval = sampling_interval  # in V
+
+    for i in range(n):
+        shutil.copy(svg_list[i], os.getcwd())
+        shutil.copy(yaml_list[i], os.getcwd())
+        export_datapackage(
+            name_list[i] + '.svg',
+            name_list[i] + '.yaml',
+            sampling_interval)
+        for j in ['.csv', '.yaml', '.svg', '.json']:
+            shutil.move(name_list[i] + j,
+                os.path.join(path0, 'database', name_list[i] + j))
+
