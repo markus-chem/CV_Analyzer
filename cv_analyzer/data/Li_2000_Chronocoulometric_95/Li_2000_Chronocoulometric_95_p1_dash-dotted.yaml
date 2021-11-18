@@ -18,7 +18,7 @@ curator:
 figure description: #This section will be updated by module `CV`
     version: 1
     linked measurements: # FTIR, SXRD, Ring Disc - indicate if any other operando methods were shown in the same plot, which is linked to the data
-    comment: Scan rate is not given in paper, but can be obtained by comparison to charge integration as 10 mV/s  # Add whatever you think is important to understand the data
+    comment: Scan rate is not given in paper, but can be obtained by comparison to charge integration as 20 mV/s  # Add whatever you think is important to understand the data
 
 electrochemical system:
     version: 1

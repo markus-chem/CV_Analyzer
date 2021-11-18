@@ -393,6 +393,7 @@ class CV_Analyzer:
         for idx, i in enumerate(self.electrolyte_name):
             # change units to mol/L
             # assuming that only 'M' and 'mM' are used
+            # assuming only one pH sensitive species
             if self.electrolyte_unit[idx] == 'mM':
                 self.c_electrolyte[idx] = self.c_electrolyte[idx] / 1000
                 self.electrolyte_unit[idx] = 'M'
@@ -404,8 +405,13 @@ class CV_Analyzer:
                 pH = 14 + math.log(self.c_electrolyte[idx])
             elif i in base_2:
                 pH = 14 + math.log(2 * self.c_electrolyte[idx])
-            else:
-                print('pH not given \npH could not be calculated')
+        
+        # set pH=7 if pH not given and not calculable
+        try:
+            pH
+        except:
+            pH = 7
+            print(f'pH could not be calculated \n assume pH = 7 for {self.name}')
         
         return pH
 
@@ -545,7 +551,7 @@ def get_exp_CV_data(sel_obj, target_RE='SHE', C_exp=False, atomic=False,
 
     return U, j
 
-def create_datapackage(sampling_interval=0.005):
+def create_datapackage(sampling_interval=0.05):
     '''
     Find all .yaml and .svg files in 'data' folder.
     Export them as datapackage into 'database'

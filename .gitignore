@@ -10,3 +10,4 @@ __pycache__
 *.egg-info/
 *.pyc
 .ipynb_checkpoints/
+*/CV_Analyzer_notebook.ipynb

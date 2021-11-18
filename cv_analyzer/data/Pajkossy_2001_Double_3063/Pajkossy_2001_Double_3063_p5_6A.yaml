@@ -67,7 +67,7 @@ electrochemical system:
                   value:
                   unit: #[M, mM, µM, g kg-1, ...] 
         ph: 
-            value: 1
+            value:
             uncertainty:
         temperature: # provide the temperature as it is given in the article. Assume room temperature if nothing is provided
             value: 298.15 
