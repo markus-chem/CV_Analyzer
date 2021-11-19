@@ -16,16 +16,23 @@ from scipy import constants
 from pathlib import Path
 
 # colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+# apply matplotlib style
+plt.style.use('seaborn-whitegrid')
 
 class CV_Analyzer:
     def __init__(self, package, resource_no):
         """
-        Initialize with basic information of package defined by the datapackage
-        module implemented in ### REFERENCE!!!!
+        Initialize a datapackage with basic information defined in the metadata
+        (.yaml file)
+        One CV per datapackage
+
         Inputs:
-        package:        Package, ### REFERENCE!!!!
-        resource_no:    str, name of the resource which you want to access
+        package:        datapackage (https://pypi.org/project/datapackage/)
+        resource_no:    integer, resource bumber (typically only 1 .csv file)
                         within the larger datapackage
+
+        Outputs:
+        None
         """
         self.package = package
         self.CV_df = pd.read_csv(package.resources[0].raw_iter(stream=False))
@@ -63,7 +70,7 @@ class CV_Analyzer:
                              ) for i in range(2)
         ]
         self.T                  = electrolyte['temperature']['value']
-        self.pH                 = electrolyte['ph'].get('value', None)
+        self.pH                 = electrolyte['ph']['value']
 
         fig_desc = metadata['figure description']
         self.scan_rate_unit = fig_desc['scan rate']['unit']
@@ -74,6 +81,7 @@ class CV_Analyzer:
             self.scan_rate = self.scan_rate / 1000
             self.scan_rate_unit = 'V / s'
 
+        # general label for legends in plots
         self.label = "{}({}) in {} at {} {}; {}".format(
             self.metal, self.hkl, self.electrolyte, self.scan_rate,
             self.scan_rate_unit, self.name
@@ -85,7 +93,14 @@ class CV_Analyzer:
     def plot_orig(self):
         """
         Recreate the cyclic voltammogram with the original experimental
-        parameters.
+        parameters. Possibly different reference electrodes on the same
+        axis.
+
+        Inputs:
+        None
+        
+        Outputs:
+        fig (matplotlib object)
         """
         fig = plt.figure('Original CV')
         plt.plot(self.CV_df['U'], self.CV_df['j'], label=self.label)
@@ -96,9 +111,28 @@ class CV_Analyzer:
 
     def plot(self, target_RE='SHE', C_exp=False, atomic=False, c_corr=False):
         """
-        Plots the cyclic voltammogram, however permits changes such as Nernstian
-        shifts, or changes to the reference electrode
+        Generic plot function for digitized CVs.
+        Current and voltage corrections can be applied:
+            - reference to another electrode (target_RE)
+                For RHE the pH is considered (and calculated from
+                components if not given in metadata)
+            - normalize on the scan rate and plot capacitance
+            - normalize area on atomic sites of the respective hkl
+            - apply a Nernstian shift (59 mV/decade) for the halide
+                (F-, Cl-, Br-, I-) concentration and normalize to 1M
+        
+        Corrections can be combined.
+
+        Inputs:
+        target_RE:      str, name of target reference electrode (s. RE_dict)
+        C_exp:          bool, capacitance plot
+        atomic:         bool, normalization on atomic surface sites
+        c_corr,         bool, Nernst shift for halide concentration to 1M
+
+        Outputs:
+        fig (matplotlib object)
         """
+
         settings = f'C_exp={C_exp}, atomic={atomic}, c_corr={c_corr}, target_RE={target_RE}'
 
         # extra columns for corrections
@@ -143,6 +177,27 @@ class CV_Analyzer:
             target_RE,
             atomic=False,
             c_corr=False):
+
+        """
+        Charge passed within a given potential window
+        (scan rate normalized integration of CV)
+        Three plots are created:
+            - CVs with voltage limits
+            - charge integral in forward scan
+            - charge integral in backward scan
+
+        Inputs:
+        lower_lim:      float, lower voltage limit in V
+        upper_lim:      float, upper voltage limit in V
+        target_RE:      str, name of target reference electrode (s. RE_dict)
+        atomic:         bool, normalization on atomic surface sites
+        c_corr:         bool, Nernst shift for halide concentration to 1M
+
+        Outputs:
+        fig (matplotlib object)
+        fig2 (matplotlib object)
+        fig3 (matplotlib object)
+        """
 
         # extra columns for corrections
         self.CV_df['U_corr'] = self.CV_df['U']
@@ -243,7 +298,21 @@ class CV_Analyzer:
 
         return fig, fig2, fig3
 
-    def max_min(self, lower_lim, upper_lim, target_RE, C_exp=False):
+    def max_min(self, lower_lim, upper_lim, target_RE, atomic=False, C_exp=False):
+
+        """
+        Shows the maximum and minimum current or capacitance within
+        a given potential window.
+
+        Inputs:
+        lower_lim:      float, lower voltage limit in V
+        upper_lim:      float, upper voltage limit in V
+        target_RE:      str, name of target reference electrode (s. RE_dict)
+        atomic:         bool, normalization on atomic surface sites
+
+        Outputs:
+        fig (matplotlib object)
+        """
 
         # extra columns for corrections
         self.CV_df['U_corr'] = self.CV_df['U']
@@ -267,10 +336,19 @@ class CV_Analyzer:
         if C_exp:
                 self.CV_df['j_corr'] = self.CV_df['j_corr'] / self.scan_rate
 
+        # atomic units
+        if atomic:
+            norm_factor = atomic_density(
+                self.metal, self.hkl)
+            self.CV_df['j_corr'] = self.CV_df['j_corr'] / constants.e / \
+                norm_factor  # A/m² / C/e- / atoms/m² = e-/(s*atom)
+
+        # find minimum and maximum
         idx = (self.CV_df['j_corr'].idxmax(), self.CV_df['j_corr'].idxmin()) # indices of min and max
         max_ = (self.CV_df.iloc[idx[0]]['U_corr'], self.CV_df.iloc[idx[0]]['j_corr'])  # x and y of max
         min_ = (self.CV_df.iloc[idx[1]]['U_corr'], self.CV_df.iloc[idx[1]]['j_corr'])  # x and y of min
 
+        # plot
         fig = plt.figure('Max_Min of CV')
         plt.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label=self.label)
         plt.scatter(max_[0], max_[1], marker='X', color='r')
@@ -288,13 +366,16 @@ class CV_Analyzer:
 
     def ref_to(self, target_RE):
         """
-        Switches the reference electrode to one of the options included in the
-        RE dictionary.
+        Helping function to calculate the voltage offset between
+        two reference electrode. Considers references listed in RE_dict.
+
         Inputs:
         target_RE:  str, name of the target reference electrode
+
         Output:
-        offset:     float, Potential shift due to reference change.
+        offset:     float, Potential shift that is substracted due to reference change
         """
+
         # check if target_RE exists
         RE_keys = list(RE_dict.keys()) + ['pzc', 'RHE']
         if target_RE not in RE_keys:
@@ -338,11 +419,17 @@ class CV_Analyzer:
 
     def c_corr(self):
         """
-        Performs a Nernstian shift to shift the concentration to the proper
-        potential.
-        Returns:
-        U_shift: float, the nernstian potential shift that is substracted
+        Helping function to calculate Nernstian shift (59 mV/dec)
+        for the halide concentration (F-, Cl-, Br-, I-).
+        Normalization on 1M halide concentration.
+
+        Inputs:
+        None
+
+        Outputs:
+        offset: float, the Nernstian potential shift that is substracted
         """
+
         # list of typical halide adsorbates
         ads_set = {'LiCl', 'NaCl', 'KCl', 'RbCl', 'CsCl',
                 'LiBr', 'NaBr', 'KBr', 'RbBr', 'CsBr',
@@ -371,7 +458,18 @@ class CV_Analyzer:
         return U_shift
 
     def calc_pH(self):
-        # calculate the pH based on the components
+        """
+        Calculates the pH based on the components.
+        Only for one pH sensitive component.
+        Only for strong acids / bases listed below.
+        If pH cannot be calculated, set to pH = 7
+        
+        Inputs:
+        None
+        
+        Outputs:
+        pH: float, pH value
+        """
 
         acids_1H = [
             'HCl', 'HClO4', 
@@ -388,7 +486,6 @@ class CV_Analyzer:
         base_2 = [
             'MgOH2', 'CaOH2'
         ]
-
 
         for idx, i in enumerate(self.electrolyte_name):
             # change units to mol/L
@@ -417,12 +514,34 @@ class CV_Analyzer:
 
 def filter_db(metal, hkl, component, **kwargs): #author_name, exclude_author):
     """
-    Inputs
+    Filter function for the database.
+    Searches for datapackages in 'database' folder that match the criteria:
+        - metal
+        - hkl of surface
+        - component (can be a fraction, e.g. 'Br' if component is 'NaBr')
+        - author_name (can be a fraction, 'H)
+        - exclude_author (do not show this author)
+
+
+    If one filter criterium is empty, it is not considered.
+    All criteria of different filters have to met a the same time
+    (e.g. component and author_name)
+    Within one filter the selection is additive (e.g. component=['Pt','Ag'] shows both)
+
+    Inputs:
+    metal:          list of str, material of working electrode
+    hkl:            list of str, lattice plane
+    component:      list of str, component of the electrolyte
+
     kwargs:
-    author_name:    list, list of first authors you wish to include, defaults to
-                    []
-    exclude_author: list, list of authors you wish to exclude, defaults to []
+    author_name:    list, list of first authors last name you wish to include,
+                    defaults to []
+    exclude_author: list, list of authors last name you wish to exclude, defaults to []
+
+    Outputs:
+    list of selected datapackages
     """
+
     from .database import get_database
     files = get_database()
     print(f'{len(files)} files loaded')
@@ -438,7 +557,7 @@ def filter_db(metal, hkl, component, **kwargs): #author_name, exclude_author):
     author_name     = kwargs.get("author_name", [])
     exclude_author  = kwargs.get("exclude_author", [])
 
-    selxn = set(CV_Analyzer(Package(i), 0) for i in files)
+    selxn = set(CV_Analyzer(Package(i), 0) for i in files) # only the first resource is considered
     for i in selxn.copy():  # iterate over copy, set cannot be changed during iteration
         if len(metal) > 0:
             if i.metadata['electrochemical system']['electrodes']['working electrode']['material'] not in metal:
@@ -504,21 +623,20 @@ def get_exp_CV_data(sel_obj, target_RE='SHE', C_exp=False, atomic=False,
                     c_corr=False):
     """
     This function takes a selection of experimental data and returns the
-    corrected applied potential and current (or pseudocapacitance)
+    corrected applied potential and current (or pseudocapacitance) as array.
+
     Inputs:
-    sel_obj:    CV_Analyzer class, the experimental selection
-    target_RE:  str, name of the reference electrode to which you want to shift
-                the potential.
-    C_exp:      bool, decides whether to translate the measured current to the
-                pseudocapacitance. This requires knowledge on the scan rate.
-    atomic:     bool, norms all the data to number of atoms, instead of on the
-                area.
-    c_corr:     bool, if True, includes a Nernstian shift depending on the
-                electrolyte concentrations.
+    sel_obj:    CV_Analyzer class object
+    target_RE:      str, name of target reference electrode (s. RE_dict)
+    C_exp:          bool, capacitance plot
+    atomic:         bool, normalization on atomic surface sites
+    c_corr:        bool, Nernst shift for halide concentration to 1M
+
     Returns:
     U:  np.array, the applied potential as a 1-d array
     j:  np.array, the measured current (or pseudocapacitance) as a 1-d array
     """
+
     # extra columns for corrections
     sel_obj.CV_df['U_corr'] = sel_obj.CV_df['U']
     sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j']
@@ -528,7 +646,6 @@ def get_exp_CV_data(sel_obj, target_RE='SHE', C_exp=False, atomic=False,
     sel_obj.CV_df['U_corr'] = sel_obj.CV_df['U_corr'] - ref_shift
 
     # current in capacitance
-
     if C_exp:
         scu = sel_obj.scan_rate_unit
         sc  = sel_obj.scan_rate
@@ -556,6 +673,14 @@ def create_datapackage(sampling_interval=0.05):
     Find all .yaml and .svg files in 'data' folder.
     Export them as datapackage into 'database'
     Database will contain .csv .yaml .svg and .json for each CV
+    The sampling interval is the parameter of the interpolation
+    procedure in the svgdigitizer module.
+
+    Inputs:
+    sampling_interval: float
+
+    Outputs:
+    None
     '''
     path0 = cv_analyzer.__path__[0] # base path of the package
     yaml_list = []
@@ -580,5 +705,7 @@ def create_datapackage(sampling_interval=0.05):
         for j in ['.csv', '.yaml', '.svg', '.json']:
             shutil.move(name_list[i] + j,
                 os.path.join(path0, 'database', name_list[i] + j))
+
+    return None
 
 
