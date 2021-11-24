@@ -20,6 +20,7 @@ RE_dict = {
     'Hg/HgSO4_1M':      0.674,  # 1M H2SO4
     'Hg/HgSO4_sat':     0.640,  # saturated K2SO4
     'Hg/HgO_1M_NaOH':   0.140,  # 1M NaOH
+    'Hg/HgO/0.1 M NaOH':0.165,  # according to Horswell et al. Langmuir 2004, 20, 10970-10981
     'Hg/HgO_20%_KOH':   0.098,  # 20% KOH
     'Ag/AgSO4_sat':     0.680,  # saturated K2SO4
     'U_abs':            4.44
