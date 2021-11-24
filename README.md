@@ -17,7 +17,7 @@ To the CVs, different corrections can be applied:
 
 ### Installation
 
-<b>``pip install -e .``</b>
+``pip install -e .``
 
 All important functions are in *CV_analyzer_notebook.ipynb*
 
