@@ -84,9 +84,6 @@ lattice_constants_dict = {
 }
 
 # calculated atomic density based on lattice constant
-# in atoms/Angstrom²
-
-
 def atomic_density(metal, lattice_plane):
     import math
     lattice_plane = str(lattice_plane)

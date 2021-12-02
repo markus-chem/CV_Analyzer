@@ -5,7 +5,7 @@ import shutil
 
 import cv_analyzer as cv
 from ._literature_params import atomic_density
-from .cv_analyzer import CV_Analyzer
+from .cv_analyzer_class import CV_Analyzer
 
 def get_database():
     """
@@ -23,39 +23,46 @@ def get_database():
     files = [os.path.join(datadir, i) for i in files if 'json' in i]
     return files
 
-def filter_db(metal, hkl, component, **kwargs): #author_name, exclude_author):
+def filter_db(metal, hkl, component, **kwargs):
     """
     Filter function for the database.
     Searches for datapackages in 'database' folder that match the criteria:
         - metal
         - hkl of surface
         - component (can be a fraction, e.g. 'Br' if component is 'NaBr')
-        - author_name (can be a fraction, 'H)
+        - include_author (can be a fraction)
         - exclude_author (do not show this author)
+        - include_label
+        - exclude_label
 
 
     If one filter criterium is empty, it is not considered.
     All criteria of different filters have to met a the same time
-    (e.g. component and author_name)
+    (e.g. component and include_author)
     Within one filter the selection is additive (e.g. component=['Pt','Ag'] shows both)
 
     Inputs:
-    metal:          list of str, material of working electrode
-    hkl:            list of str, lattice plane
-    component:      list of str, component of the electrolyte
-
-    kwargs:
-    author_name:    list, list of first authors last name you wish to include,
-                    defaults to []
-    exclude_author: list, list of authors last name you wish to exclude, defaults to []
+    **kwargs:
+        metal:          list of str, material of working electrode
+        hkl:            list of str, lattice plane
+        component:      list of str, component of the electrolyte
+        include_author:    list, list of first authors last name you wish to include,
+                        defaults to []
+        exclude_author: list, list of authors last name you wish to exclude, defaults to []
+        include_label:  list of labels to be include, default to []
+        exclude_label:  list of labels to be exclude, default to []
 
     Outputs:
     list of selected datapackages
     """
 
-    from .database import get_database
     files = get_database()
     print(f'{len(files)} files loaded')
+
+    include_author  = kwargs.get('include_author', [])
+    exclude_author  = kwargs.get('exclude_author', [])
+    include_label   = kwargs.get('include_label', [])
+    exclude_label   = kwargs.get('exclude_label', [])
 
     if not isinstance(metal, list):
         metal = [metal]
@@ -65,13 +72,9 @@ def filter_db(metal, hkl, component, **kwargs): #author_name, exclude_author):
     if not isinstance(component, list):
         component = [component]
 
-    author_name     = kwargs.get("author_name", [])
-    exclude_author  = kwargs.get("exclude_author", [])
-    exclude_label   = kwargs.get("exclude_label", [])
-
     selxn = set(CV_Analyzer(Package(i), 0) for i in files) # only the first resource is considered
     for i in selxn.copy():  # iterate over copy, set cannot be changed during iteration
-
+        # Apply filter criteria
         if len(metal) > 0:
             if i.metadata['electrochemical system']['electrodes']['working electrode']['material'] not in metal:
                 try:
@@ -102,34 +105,37 @@ def filter_db(metal, hkl, component, **kwargs): #author_name, exclude_author):
                 except BaseException:
                     pass
 
-        if len(author_name) > 0:
+        if len(include_author) > 0:
             # join to one string and check for matches
-            author_name_filter = author_name
-            author_name_exp = i.metadata['source']['bib'].split('_')[0] # author is string before 1st '_'
+            include_author_filter = include_author
+            include_author_exp = i.metadata['source']['bib'].split('_')[0] # author is string before 1st '_'
             # remove element if none of the filter criteria matches
-            if any(author_name_filter[k] in author_name_exp for k in range(len(author_name_filter))) == False:
+            if any(include_author_filter[k] in include_author_exp for k in range(len(include_author_filter))) == False:
                 try:
                     selxn.remove(i)
                 except BaseException:
                     pass
 
         if any(
-            i.metadata['source']['bib'].find(
-                exclude_author[j]) != -
-                1 for j in range(
-                len(exclude_author))):
+            i.metadata['source']['bib'].find(exclude_author[j]) != -1
+                for j in range(len(exclude_author))):
             try:
                 selxn.remove(i)
             except BaseException:
                 pass
         else:
             pass
+        
+        if len(include_label) > 0:
+            if any(include_label[k] in i.label for k in range(len(include_label))) == False:
+                try:
+                    selxn.remove(i)
+                except BaseException:
+                    pass
 
         if any(
-            i.label.find(
-                exclude_label[j]) != -
-                1 for j in range(
-                len(exclude_label))):
+            i.label.find(exclude_label[j]) != -1 
+                for j in range(len(exclude_label))):
             try:
                 selxn.remove(i)
             except BaseException:

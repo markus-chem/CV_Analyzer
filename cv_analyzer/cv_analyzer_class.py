@@ -33,29 +33,41 @@ class CV_Analyzer:
         """
         metadata    = self.package.descriptor
         e_chem_sys  = metadata['electrochemical system']
-
         electrodes  = e_chem_sys['electrodes']
+
         self.RE     = electrodes['reference electrode']['type']
         work_elec   = electrodes['working electrode']
         self.metal  = work_elec['material']
         self.hkl    = work_elec['crystallographic orientation']
 
-        # Assuming there are only 2 components
         electrolyte = e_chem_sys['electrolyte']
         elec_comps  = electrolyte['components']
-        self.electrolyte_name   = [elec_comps[i]['name'] for i in [0, 3]]
+
+        # exclude solvent and empty fields 
+        self.electrolyte_name   = [
+            elec_comps[i]['name'] \
+            for i in range(len(elec_comps)) if \
+            (elec_comps[i]['type'] != 'solvent') & (elec_comps[i]['name'] != None)
+            ]
+        
         self.c_electrolyte      = [
-            elec_comps[i]['concentration']['value'] for i in [0, 3]
-        ]
+            elec_comps[i]['concentration']['value'] \
+            for i in range(len(elec_comps)) if \
+            (elec_comps[i]['type'] != 'solvent') & (elec_comps[i]['name'] != None)
+            ]
+        
         self.electrolyte_unit   = [
-            elec_comps[i]['concentration']['unit'] for i in [0, 3]
-        ]
+            elec_comps[i]['concentration']['unit'] \
+            for i in range(len(elec_comps)) if \
+            (elec_comps[i]['type'] != 'solvent') & (elec_comps[i]['name'] != None)
+            ]
 
         self.electrolyte        = [
             "{} {} {}".format(self.c_electrolyte[i], self.electrolyte_unit[i],
-                              self.electrolyte_name[i]
-                             ) for i in range(2)
+                                self.electrolyte_name[i])
+                                for i in range(len(self.c_electrolyte))
         ]
+
         self.T                  = electrolyte['temperature']['value']
         self.pH                 = electrolyte['ph']['value']
 
@@ -133,7 +145,7 @@ class CV_Analyzer:
         if C_exp:
                 self.CV_df['j_corr'] = self.CV_df['j_corr'] / self.scan_rate
 
-        # current in atomic units: A/m² / atoms/m² = A/atom
+        # current in atomic units: µA/cm² / atoms/cm² = µA/atom
         if atomic:
             rho_atomic = atomic_density(self.metal, self.hkl)
             self.CV_df['j_corr'] = self.CV_df['j_corr'] / rho_atomic
@@ -193,24 +205,22 @@ class CV_Analyzer:
         # reference to target_RE
         self.CV_df['U_corr'] = self.CV_df['U'] - self.ref_to(target_RE)
 
-        # check voltage limits
-        if lower_lim < min(
-                self.CV_df['U_corr']) or upper_lim > max(
-                self.CV_df['U_corr']):
-            raise ValueError(f'Voltage limits out of range for {self.name}')
-
         # apply concentration correction
         if c_corr:
             self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.c_corr()
         else:
             pass
 
+        # check voltage limits
+        if lower_lim < min(
+                self.CV_df['U_corr']) or upper_lim > max(self.CV_df['U_corr']):
+            raise ValueError(f'Voltage limits out of range for {self.name} !')
+
         # atomic units
         if atomic:
-            norm_factor = atomic_density(
-                self.metal, self.hkl)
-            self.CV_df['j_corr'] = self.CV_df['j_corr'] / constants.e / \
-                norm_factor  # A/m² / C/e- / atoms/m² = e-/(s*atom)
+            norm_factor = atomic_density(self.metal, self.hkl)
+            self.CV_df['j_corr'] = self.CV_df['j_corr'] / (constants.e * 10**6) / \
+                norm_factor  # µA/cm² / µC/e- / atoms/cm² = e-/(s*atom)
 
         # seperate anodic and cathodic scan, apply voltage limits
         forw_scan = self.CV_df.where(
