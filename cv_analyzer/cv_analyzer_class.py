@@ -43,7 +43,6 @@ class CV_Analyzer:
         e_chem_sys  = metadata['electrochemical system']
         electrodes  = e_chem_sys['electrodes']
 
-        self.RE     = electrodes['reference electrode']['type']
         work_elec   = electrodes['working electrode']
         self.metal  = work_elec['material']
         self.hkl    = work_elec['crystallographic orientation']
@@ -77,6 +76,7 @@ class CV_Analyzer:
         self.pH                 = electrolyte['ph']['value']
 
         fig_desc                = metadata['figure description']
+        self.RE                 = fig_desc['potential scale']['reference']
         self.scan_rate_unit     = fig_desc['scan rate']['unit']
         self.scan_rate          = fig_desc['scan rate']['value']
 
