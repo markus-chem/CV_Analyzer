@@ -2,10 +2,16 @@ from datapackage import Package
 from pathlib import Path
 import os
 import shutil
+import yaml
+import datetime
 
 import cv_analyzer as cv
 from ._literature_params import atomic_density
 from .cv_analyzer_class import CV_Analyzer
+
+from svgdigitizer.svgplot import SVGPlot
+from svgdigitizer.svg import SVG
+from svgdigitizer.electrochemistry.cv import CV
 
 def get_database():
     """
@@ -64,6 +70,11 @@ def filter_db(metal, hkl, component, **kwargs):
     include_label   = kwargs.get('include_label', [])
     exclude_label   = kwargs.get('exclude_label', [])
 
+    include_author  = [j.lower() for j in include_author]
+    exclude_author  = [j.lower() for j in exclude_author]
+    include_label   = [j.lower() for j in include_label]
+    exclude_label   = [j.lower() for j in exclude_label]
+
     if not isinstance(metal, list):
         metal = [metal]
     if not isinstance(hkl, list):
@@ -76,7 +87,7 @@ def filter_db(metal, hkl, component, **kwargs):
     for i in selxn.copy():  # iterate over copy, set cannot be changed during iteration
         # Apply filter criteria
         if len(metal) > 0:
-            if i.metadata['electrochemical system']['electrodes']['working electrode']['material'] not in metal:
+            if i.metal not in metal:
                 try:
                     selxn.remove(i)
                 except BaseException:
@@ -85,7 +96,7 @@ def filter_db(metal, hkl, component, **kwargs):
                 pass
 
         if len(hkl) > 0:
-            if i.metadata['electrochemical system']['electrodes']['working electrode']['crystallographic orientation'] not in hkl:
+            if i.hkl not in hkl:
                 try:
                     selxn.remove(i)
                 except BaseException:
@@ -94,31 +105,22 @@ def filter_db(metal, hkl, component, **kwargs):
                 pass
         
         if len(component) > 0:
-            # join to one string and check if actual components and experimental component match
-            component_filter = component
-            component_exp = ''.join(filter(None,
-                [i.metadata['electrochemical system']['electrolyte']['components'][j]['name'] for j in range(4)]))
             # remove element if none of the filter criteria matches
-            if any(component_filter[k] in component_exp for k in range(len(component_filter))) == False:
+            if any(k in i.electrolyte_name for j, k in enumerate(component)) == False:
                 try:
                     selxn.remove(i)
                 except BaseException:
                     pass
 
         if len(include_author) > 0:
-            # join to one string and check for matches
-            include_author_filter = include_author
-            include_author_exp = i.metadata['source']['bib'].split('_')[0] # author is string before 1st '_'
             # remove element if none of the filter criteria matches
-            if any(include_author_filter[k] in include_author_exp for k in range(len(include_author_filter))) == False:
+            if any(k in i.author for j, k in enumerate(include_author)) == False:
                 try:
                     selxn.remove(i)
                 except BaseException:
                     pass
 
-        if any(
-            i.metadata['source']['bib'].find(exclude_author[j]) != -1
-                for j in range(len(exclude_author))):
+        if any(i.author is k for j, k in enumerate(exclude_author)):
             try:
                 selxn.remove(i)
             except BaseException:
@@ -127,15 +129,14 @@ def filter_db(metal, hkl, component, **kwargs):
             pass
         
         if len(include_label) > 0:
-            if any(include_label[k] in i.label for k in range(len(include_label))) == False:
+            if any(k in i.label for j, k in enumerate(include_label)) == False:
                 try:
                     selxn.remove(i)
                 except BaseException:
                     pass
 
-        if any(
-            i.label.find(exclude_label[j]) != -1 
-                for j in range(len(exclude_label))):
+        # if any(i.label.find(k) != -1 for j, k in enumerate(exclude_label)):
+        if any(k in i.label for j, k in enumerate(exclude_label)):
             try:
                 selxn.remove(i)
             except BaseException:
@@ -155,17 +156,18 @@ def get_exp_CV_data(sel_obj, target_RE='SHE', C_exp=False, atomic=False,
     """
     This function takes a selection of experimental data and returns the
     corrected applied potential and current (or pseudocapacitance) as array.
+    (same corrections as in plot function)
 
     Inputs:
-    sel_obj:    CV_Analyzer class object
+    sel_obj:        CV_Analyzer class object
     target_RE:      str, name of target reference electrode (s. RE_dict)
     C_exp:          bool, capacitance plot
     atomic:         bool, normalization on atomic surface sites
-    c_corr:        bool, Nernst shift for halide concentration to 1M
+    c_corr:         bool, Nernst shift for halide concentration to 1M
 
     Returns:
-    U:  np.array, the applied potential as a 1-d array
-    j:  np.array, the measured current (or pseudocapacitance) as a 1-d array
+    U:              np.array, the applied potential as a 1-d array
+    j:              np.array, the measured current (or pseudocapacitance) as a 1-d array
     """
 
     # extra columns for corrections
@@ -173,19 +175,13 @@ def get_exp_CV_data(sel_obj, target_RE='SHE', C_exp=False, atomic=False,
     sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j']
 
     # reference correction
-    ref_shift = sel_obj.ref_to(target_RE)
-    sel_obj.CV_df['U_corr'] = sel_obj.CV_df['U_corr'] - ref_shift
+    sel_obj.CV_df['U_corr'] = sel_obj.CV_df['U_corr'] - sel_obj.ref_to(target_RE)
 
-    # current in capacitance
+    # current to capacitance
     if C_exp:
-        scu = sel_obj.scan_rate_unit
-        sc  = sel_obj.scan_rate
-        if 'mV' in scu:
-            # scan rate from mV/s to V/s
-            sc /= 1000.
-        sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j_corr'] / sc
+            sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j_corr'] / sel_obj.scan_rate
 
-    # current in atomic units: A/m² / atoms/m² = A/atom
+    # current in atomic units: µA/cm² / atoms/cm² = µA/atom
     if atomic:
         rho_atomic = atomic_density(sel_obj.metal, sel_obj.hkl)
         sel_obj.CV_df['j_corr'] = sel_obj.CV_df['j_corr'] / rho_atomic
@@ -221,12 +217,15 @@ def create_datapackage(sampling_interval=0.05):
         yaml_list.append(path)
         svg_list.append(path.with_suffix('.svg'))
         name_list.append(str(path.stem))
-    n = len(yaml_list)
-    print(f'Found .yaml files: \n{yaml_list}')
+    n = len(name_list)
+    print('Found .yaml files:\n')
+    print(*name_list, sep='\n')
 
     sampling_interval = sampling_interval  # in V
 
+    print('\nExporting ... \n')
     for i in range(n):
+        print(name_list[i])
         shutil.copy(svg_list[i], os.getcwd())
         shutil.copy(yaml_list[i], os.getcwd())
         export_datapackage(
@@ -239,43 +238,24 @@ def create_datapackage(sampling_interval=0.05):
 
     return None
 
-def export_datapackage(svg, metadata, sampling_interval=1):
-    from datapackage import Package
-    import shutil
-    import copy
-    import yaml
-    from svgdigitizer.svgplot import SVGPlot
-    from svgdigitizer.svg import SVG
-    from svgdigitizer.electrochemistry.cv import CV
-    from pathlib import Path
-    import datetime
+def export_datapackage(svg, metadata, sampling_interval):
 
-    print(metadata, bool(metadata))
     if metadata:
-        with open(metadata, "r") as f:
+        with open(metadata, 'r') as f:
             metadata = yaml.load(f, Loader=yaml.SafeLoader)
 
-    print(metadata, bool(metadata))
     cv = CV(SVGPlot(SVG(open(svg, 'rb')),
             sampling_interval=sampling_interval), metadata=metadata)
     csvname = Path(svg).with_suffix('.csv')
-    print(csvname)
     cv.df.to_csv(csvname, index=False)
-    print(cv.metadata)
 
     def defaultconverter(o):
         if isinstance(o, datetime.datetime):
             return o.__str__()
 
     p = Package(cv.metadata)
-
-    print(p.descriptor.keys())
-
     p.infer(str(csvname))
-    print(p.descriptor['resources'][0]['name'],
-          p.descriptor['resources'][0]['path'],
-          p.descriptor['resources'][0]['schema'])
 
     import json
-    with open(Path(svg).with_suffix('.json'), "w") as outfile:
+    with open(Path(svg).with_suffix('.json'), 'w') as outfile:
         json.dump(p.descriptor, outfile, default=defaultconverter)

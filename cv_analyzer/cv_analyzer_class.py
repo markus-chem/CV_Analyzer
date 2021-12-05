@@ -12,6 +12,7 @@ class CV_Analyzer:
         Initialize a datapackage with basic information defined in the metadata
         (.yaml file)
         One CV per datapackage
+        Current unit is changed from A/m² to A/cm²
 
         Inputs:
         package:        datapackage (https://pypi.org/project/datapackage/)
@@ -21,17 +22,24 @@ class CV_Analyzer:
         Outputs:
         None
         """
-        self.package = package
-        self.CV_df = pd.read_csv(package.resources[0].raw_iter(stream=False))
+        self.package    = package
+        self.CV_df      = pd.read_csv(package.resources[0].raw_iter(stream=False))
         self.CV_df['j'] = self.CV_df['j'] * 100 # change unit from A/m² to µA/cm²
-        self.name = package.resource_names[resource_no]
+        self.name       = package.resource_names[resource_no]
         self._get_inputs()
 
     def _get_inputs(self):
         """
-        Collects the experimental information from the package information.
+        Collects the experimental information from the package information
+        Excludes None values for the components and concentrations
+        Scan rate to V/s
+        Define the label for legend in plots
+
+        Outputs:
+        None
         """
         metadata    = self.package.descriptor
+        self.author = metadata['source']['bib'].split('_')[0]
         e_chem_sys  = metadata['electrochemical system']
         electrodes  = e_chem_sys['electrodes']
 
@@ -43,48 +51,43 @@ class CV_Analyzer:
         electrolyte = e_chem_sys['electrolyte']
         elec_comps  = electrolyte['components']
 
-        # exclude solvent and empty fields 
-        self.electrolyte_name   = [
-            elec_comps[i]['name'] \
-            for i in range(len(elec_comps)) if \
-            (elec_comps[i]['type'] != 'solvent') & (elec_comps[i]['name'] != None)
+        # exclude solvent and None values
+        self.electrolyte_name   = [v['name'] for i, v in enumerate(elec_comps)
+            if (elec_comps[i]['type'] != 'solvent') & (elec_comps[i]['name'] != None) 
             ]
         
         self.c_electrolyte      = [
-            elec_comps[i]['concentration']['value'] \
-            for i in range(len(elec_comps)) if \
-            (elec_comps[i]['type'] != 'solvent') & (elec_comps[i]['name'] != None)
+            v['concentration']['value'] for i, v in enumerate(elec_comps)
+            if (elec_comps[i]['type'] != 'solvent') & (elec_comps[i]['name'] != None)
             ]
         
         self.electrolyte_unit   = [
-            elec_comps[i]['concentration']['unit'] \
-            for i in range(len(elec_comps)) if \
-            (elec_comps[i]['type'] != 'solvent') & (elec_comps[i]['name'] != None)
+            v['concentration']['unit'] for i, v in enumerate(elec_comps)
+            if (elec_comps[i]['type'] != 'solvent') & (elec_comps[i]['name'] != None)
             ]
 
-        self.electrolyte        = [
-            "{} {} {}".format(self.c_electrolyte[i], self.electrolyte_unit[i],
-                                self.electrolyte_name[i])
-                                for i in range(len(self.c_electrolyte))
+        # do not print out None values in the legend of the plot
+        # list of all components and each component is a list
+        self.electrolyte = [
+            ' '.join(map(str, filter(None, (i, j, k)))) \
+            for i, j, k in zip(self.c_electrolyte, self.electrolyte_unit, self.electrolyte_name)
         ]
 
         self.T                  = electrolyte['temperature']['value']
         self.pH                 = electrolyte['ph']['value']
 
-        fig_desc = metadata['figure description']
-        self.scan_rate_unit = fig_desc['scan rate']['unit']
-        self.scan_rate = fig_desc['scan rate']['value']
+        fig_desc                = metadata['figure description']
+        self.scan_rate_unit     = fig_desc['scan rate']['unit']
+        self.scan_rate          = fig_desc['scan rate']['value']
 
         # change scan rate to V / s if necessary
         if 'mV' in self.scan_rate_unit:
-            self.scan_rate = self.scan_rate / 1000
-            self.scan_rate_unit = 'V / s'
+            self.scan_rate      = self.scan_rate / 1000
+            self.scan_rate_unit = 'V/s'
 
         # general label for legends in plots
-        self.label = "{}({}) in {} at {} {}; {}".format(
-            self.metal, self.hkl, self.electrolyte, self.scan_rate,
-            self.scan_rate_unit, self.name
-        )
+        self.label = f'{self.metal}({self.hkl}) in {", ".join(self.electrolyte)} at {self.scan_rate} {self.scan_rate_unit} ({self.name})'
+
         self.metadata = metadata
 
         return None
@@ -99,7 +102,7 @@ class CV_Analyzer:
         None
         
         Outputs:
-        fig (matplotlib object)
+        fig (matplotlib)
         """
         fig = plt.figure('Original CV')
         plt.plot(self.CV_df['U'], self.CV_df['j'], label=self.label)
@@ -117,8 +120,9 @@ class CV_Analyzer:
                 components if not given in metadata)
             - normalize on the scan rate and plot capacitance
             - normalize area on atomic sites of the respective hkl
-            - apply a Nernstian shift (59 mV/decade) for the halide
-                (F-, Cl-, Br-, I-) concentration and normalize to 1M
+            - apply a Nernstian shift for 1e- adsorption
+                (59 mV/decade) for the halide (F-, Cl-, Br-, I-)
+                concentration and normalize to 1M
         
         Corrections can be combined.
 
@@ -126,13 +130,14 @@ class CV_Analyzer:
         target_RE:      str, name of target reference electrode (s. RE_dict)
         C_exp:          bool, capacitance plot
         atomic:         bool, normalization on atomic surface sites
-        c_corr,         bool, Nernst shift for halide concentration to 1M
+        c_corr:         bool, Nernst shift for halide concentration to 1M
 
         Outputs:
-        fig (matplotlib object)
+        fig (matplotlib)
         """
 
-        settings = f'C_exp={C_exp}, atomic={atomic}, c_corr={c_corr}, target_RE={target_RE}'
+        # settings are displayed in the figure title
+        settings = f'{C_exp=}, {atomic=}, {c_corr=}, {target_RE=}'
 
         # extra columns for corrections
         self.CV_df['U_corr'] = self.CV_df['U']
@@ -175,11 +180,13 @@ class CV_Analyzer:
             upper_lim,
             target_RE,
             atomic=False,
-            c_corr=False):
+            c_corr=False,
+            base_cap=0):
 
         """
         Charge passed within a given potential window
         (scan rate normalized integration of CV)
+
         Three plots are created:
             - CVs with voltage limits
             - charge integral in forward scan
@@ -193,10 +200,12 @@ class CV_Analyzer:
         c_corr:         bool, Nernst shift for halide concentration to 1M
 
         Outputs:
-        fig (matplotlib object)
-        fig2 (matplotlib object)
-        fig3 (matplotlib object)
+        fig (matplotlib)
+        fig2 (matplotlib)
+        fig3 (matplotlib)
         """
+
+        settings = f'{lower_lim=} V, {upper_lim=} V, {target_RE=}, {atomic=}, {c_corr=}'
 
         # extra columns for corrections
         self.CV_df['U_corr'] = self.CV_df['U']
@@ -212,72 +221,79 @@ class CV_Analyzer:
             pass
 
         # check voltage limits
-        if lower_lim < min(
-                self.CV_df['U_corr']) or upper_lim > max(self.CV_df['U_corr']):
+        if lower_lim < min(self.CV_df['U_corr']) \
+            or upper_lim > max(self.CV_df['U_corr']):
             raise ValueError(f'Voltage limits out of range for {self.name} !')
+
+        # current to capacitance
+        self.CV_df['j_corr'] = self.CV_df['j_corr'] / self.scan_rate # µF/cm²
 
         # atomic units
         if atomic:
             norm_factor = atomic_density(self.metal, self.hkl)
-            self.CV_df['j_corr'] = self.CV_df['j_corr'] / (constants.e * 10**6) / \
-                norm_factor  # µA/cm² / µC/e- / atoms/cm² = e-/(s*atom)
+            self.CV_df['j_corr'] = self.CV_df['j_corr'] / (constants.e * 10**6) / norm_factor
+            # µF/cm² / µC/e- / atoms/cm² = e-/(V*atom)
 
         # seperate anodic and cathodic scan, apply voltage limits
         forw_scan = self.CV_df.where(
-            (self.CV_df['j_corr'] > 0) & (
-                self.CV_df['U_corr'] > lower_lim) & (
-                self.CV_df['U_corr'] < upper_lim))
+            (self.CV_df['j_corr'] > 0)
+            & (self.CV_df['U_corr'] > lower_lim)
+            & (self.CV_df['U_corr'] < upper_lim)
+                )
         backw_scan = self.CV_df.where(
-            (self.CV_df['j_corr'] < 0) & (
-                self.CV_df['U_corr'] > lower_lim) & (
-                self.CV_df['U_corr'] < upper_lim))
+            (self.CV_df['j_corr'] < 0)
+            & (self.CV_df['U_corr'] > lower_lim)
+            & (self.CV_df['U_corr'] < upper_lim)
+                )
 
         # voltage for the integration needs to start with 0 V
-        int_voltage_forw = forw_scan['U_corr'] - lower_lim
-        int_voltage_backw = backw_scan['U_corr'] - lower_lim
+        int_voltage_forw    = forw_scan['U_corr'] - lower_lim
+        int_voltage_backw   = backw_scan['U_corr'] - lower_lim
 
-        # convert to numpy and remove nan (needed for np.trapz() integration)
-        voltage_forw_np = forw_scan['U_corr'].to_numpy()
-        voltage_forw_np = voltage_forw_np[~np.isnan(voltage_forw_np)]
-        voltage_backw_np = backw_scan['U_corr'].to_numpy()
-        voltage_backw_np = voltage_backw_np[~np.isnan(voltage_backw_np)]
-        forw_scan_np = forw_scan['j_corr'].to_numpy()
-        forw_scan_np = forw_scan_np[~np.isnan(forw_scan_np)]
-        backw_scan_np = backw_scan['j_corr'].to_numpy()
-        backw_scan_np = backw_scan_np[~np.isnan(backw_scan_np)]
-        int_voltage_forw_np = np.array(int_voltage_forw)
-        int_voltage_forw_np = int_voltage_forw_np[~np.isnan(
-            int_voltage_forw_np)]
-        int_voltage_backw_np = np.array(int_voltage_backw)
-        int_voltage_backw_np = int_voltage_backw_np[~np.isnan(
-            int_voltage_backw_np)]
+        # convert to numpy and remove nan values (needed for np.trapz() integration)
+        voltage_forw_np         = forw_scan['U_corr'].to_numpy()
+        voltage_forw_np         = voltage_forw_np[~np.isnan(voltage_forw_np)]
+        voltage_backw_np        = backw_scan['U_corr'].to_numpy()
+        voltage_backw_np        = voltage_backw_np[~np.isnan(voltage_backw_np)]
+        forw_scan_np            = forw_scan['j_corr'].to_numpy()
+        forw_scan_np            = forw_scan_np[~np.isnan(forw_scan_np)]
+        backw_scan_np           = backw_scan['j_corr'].to_numpy()
+        backw_scan_np           = backw_scan_np[~np.isnan(backw_scan_np)]
+        int_voltage_forw_np     = np.array(int_voltage_forw)
+        int_voltage_forw_np     = int_voltage_forw_np[~np.isnan(int_voltage_forw_np)]
+        int_voltage_backw_np    = np.array(int_voltage_backw)
+        int_voltage_backw_np    = int_voltage_backw_np[~np.isnan(int_voltage_backw_np)]
 
         # integrate
-        Q_forw_int = [np.trapz(forw_scan_np[:i+1], int_voltage_forw_np[:i+1]) /
-                      self.scan_rate for i in range(len(forw_scan_np))]
-        Q_backw_int = [np.trapz(backw_scan_np[:i+1], int_voltage_backw_np[:i+1]) /
-                       self.scan_rate for i in range(len(backw_scan_np))]
+        Q_forw_int  = [np.trapz(forw_scan_np[:i+1], int_voltage_forw_np[:i+1])
+                      for i, (v, w) in enumerate(zip(forw_scan_np, int_voltage_forw_np))]
+        Q_backw_int = [np.trapz(backw_scan_np[:i+1], int_voltage_backw_np[:i+1])
+                      for i in range(len(backw_scan_np))]
 
         # plot CV with limits
-        fig = plt.figure('integrated CV')
-        plt.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label=self.label)
+        fig = plt.figure(f'CV {settings}')
+        plt.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label = self.label)
         plt.vlines(
-            lower_lim, min(
-                self.CV_df['j_corr']), max(
-                self.CV_df['j_corr']), color='grey', linestyles='solid')
+            lower_lim, min(self.CV_df['j_corr']),
+                max(self.CV_df['j_corr']), color = 'grey', linestyles = 'solid')
         plt.vlines(
             upper_lim, min(
                 self.CV_df['j_corr']), max(
-                self.CV_df['j_corr']), color='grey', linestyles='solid')
+                self.CV_df['j_corr']), color = 'grey', linestyles = 'solid')
+        if base_cap > 0:
+            plt.hlines(base_cap, min(self.CV_df['U_corr']), max(self.CV_df['U_corr']),
+                color='k', linestyles='dashed')       
         plt.xlabel(f'U / V vs. {target_RE}')
         if atomic:
-            plt.ylabel('j / e-/(s*atom)')
+            plt.ylabel('j / µF/atom)')
         else:
-            plt.ylabel('j / µA/cm²')
+            plt.ylabel('j / µF/cm$^2$')
 
         # evaluate Q_forw over voltage and plot
-        fig2 = plt.figure('charge integration forward')
+        fig2 = plt.figure(f'int_forw {settings}')
         plt.plot(voltage_forw_np, Q_forw_int, label=f'{self.label}')
+        if base_cap > 0:
+            plt.plot(voltage_forw_np, int_voltage_forw_np * base_cap, color='k')
         plt.xlabel(f'U / V vs. {target_RE}')
         if atomic:
             plt.ylabel('Q / e-/atom')
@@ -285,8 +301,11 @@ class CV_Analyzer:
             plt.ylabel('Q / µC/cm²')
 
         # evaluate Q_backw over voltage and plot
-        fig3 = plt.figure('charge integration backward')
+        fig3 = plt.figure(f'int_backw {settings}')
         plt.plot(voltage_backw_np, Q_backw_int, label=f'{self.label}')
+        if base_cap > 0:
+            y = max(abs(int_voltage_backw_np * base_cap)) - int_voltage_backw_np * base_cap
+            plt.plot(voltage_backw_np, y, color='k')
         plt.xlabel(f'U / V vs. {target_RE}')
         if atomic:
             plt.ylabel('Q / e-/atom')
@@ -311,6 +330,8 @@ class CV_Analyzer:
         fig (matplotlib object)
         """
 
+        settings = f'{lower_lim=} V, {upper_lim=} V, {target_RE=}, {atomic=}, {C_exp=}'
+
         # extra columns for corrections
         self.CV_df['U_corr'] = self.CV_df['U']
         self.CV_df['j_corr'] = self.CV_df['j']
@@ -325,7 +346,7 @@ class CV_Analyzer:
             raise ValueError(f'Voltage limits out of range for {self.name}')
 
         # apply voltage limits
-        self.CV_df = self.CV_df.where(
+        self.CV_df[['U_corr', 'j_corr']] = self.CV_df[['U_corr', 'j_corr']].where(
                 (self.CV_df['U_corr'] > lower_lim) &
                 (self.CV_df['U_corr'] < upper_lim))
 
@@ -346,16 +367,23 @@ class CV_Analyzer:
         min_ = (self.CV_df.iloc[idx[1]]['U_corr'], self.CV_df.iloc[idx[1]]['j_corr'])  # x and y of min
 
         # plot
-        fig = plt.figure('Max_Min of CV')
+        fig = plt.figure(f'Max_Min {settings}')
         plt.plot(self.CV_df['U_corr'], self.CV_df['j_corr'], label=self.label)
         plt.scatter(max_[0], max_[1], marker='X', color='r')
         plt.scatter(min_[0], min_[1], marker='X', color='r')
         plt.xlabel(f'U / V vs. {target_RE}')
-        plt.ylabel('j / µA/cm$^2$')
+        if (C_exp) & (atomic == False):
+            plt.ylabel('C / µF/cm$^2$')
+        elif (C_exp) & (atomic):
+            plt.ylabel('C / µF/atom')
+        elif (C_exp == False) & (atomic == False):
+            plt.ylabel('j / µA/cm$^2$')
+        elif (C_exp == False) & (atomic == True):
+            plt.ylabel('j / µA/atom')
 
         print(
-            f'Maximum: U = {round(max_[0], 2)}, j = {round(max_[1], 2)} \
-            Minimum U = {round(min_[1], 2)}, j = {round(min_[1], 2)} \
+            f'Maximum: U = {max_[0]:.2f}, j = {max_[1]:.2f} \
+            Minimum U = {min_[1]:.2f}, j = {min_[1]:.2f} \
             {self.name}')
 
         return fig

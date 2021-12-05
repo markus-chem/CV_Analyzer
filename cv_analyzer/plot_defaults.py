@@ -128,7 +128,7 @@ def set_default_params():
                     'lines.linewidth':      1.5,
                     'lines.markersize':     8,
                     
-                    # 'font.family':         'serif',
+                    'font.family':         'serif',
                     # 'font.family':          'sans-serif',
                     #'font.sans-serif':      ['Helvetica'],
                     # 'font.sans-serif':      ['helvet'],
