@@ -6,20 +6,20 @@ Important information for each CV, such as electrodes, solvent, electrolyte, sca
 
 <p>Data is stored in datapackages (https://pypi.org/project/datapackage/). By applying certain filter criteria, literature data can be easily compared and analyzed. </p>
 
-<p>Focus on CVs of single crystal metal surfaces in aqueous media.</p>
+<p>Focus on CVs of single crystal metal surfaces in aqueous media. CVs can be selected by filtering a database</p>
 
 To the CVs, different corrections can be applied:
 
-- reference the potential to another reference electrode (including pH-dependent Reversible Hydrogen Electrode (RHE), the potential of zero charge (pzc) of the metal, ...)
-- normalize the areal current density with the scan rate (areal capacitance plot)
-- normalize on surface atoms of the respective lattice plane instead of the geometric area
-- integrate the passed charge in a voltage window
+- reference the potential of several CVs to a common reference electrode (including pH-dependent Reversible Hydrogen Electrode (RHE), the potential of zero charge (pzc) of the metal, ...)
+- normalize the current density with the scan rate (capacitance plot)
+- normalize the geometric curren density to surface atoms of the respective lattice plane
+- integrate the charge flow within voltage limits
 
-### Installation
+**installation**
 
 ``pip install -e .``
 
-All important functions are in *CV_analyzer_notebook.ipynb*
+Examples in example.ipynb
 
 
 

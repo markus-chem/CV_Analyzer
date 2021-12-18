@@ -125,7 +125,7 @@ def set_default_params():
     rcdict =    {
                     'figure.figsize':       (12, 9),
                     'font.size':            12,
-                    'lines.linewidth':      1.5,
+                    'lines.linewidth':      2.,
                     'lines.markersize':     8,
                     
                     'font.family':         'serif',
@@ -153,7 +153,7 @@ def set_default_params():
                     'legend.framealpha':    1,
                     'legend.markerscale':   1.5,
 
-                    'axes.linewidth':       1.2,
+                    'axes.linewidth':       1.5,
                     'axes.grid':            True,
                     'axes.labelsize':       14,
 

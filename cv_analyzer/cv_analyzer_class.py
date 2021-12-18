@@ -39,7 +39,7 @@ class CV_Analyzer:
         None
         """
         metadata    = self.package.descriptor
-        self.author = metadata['source']['bib'].split('_')[0]
+        self.author = metadata['source']['bib'].split('_')[0].lower()
         e_chem_sys  = metadata['electrochemical system']
         electrodes  = e_chem_sys['electrodes']
 
@@ -86,7 +86,7 @@ class CV_Analyzer:
             self.scan_rate_unit = 'V/s'
 
         # general label for legends in plots
-        self.label = f'{self.metal}({self.hkl}) in {", ".join(self.electrolyte)} at {self.scan_rate} {self.scan_rate_unit} ({self.name})'
+        self.label = f'{self.metal}({self.hkl}) in {", ".join(self.electrolyte)}, pH={self.pH}, at {self.scan_rate} {self.scan_rate_unit}, ({self.name})'
 
         self.metadata = metadata
 
@@ -111,7 +111,7 @@ class CV_Analyzer:
 
         return fig
 
-    def plot(self, target_RE='SHE', C_exp=False, atomic=False, c_corr=False):
+    def plot(self, target_RE='SHE', C_exp=False, atomic=False, c_corr={}):
         """
         Generic plot function for digitized CVs.
         Current and voltage corrections can be applied:
@@ -130,7 +130,7 @@ class CV_Analyzer:
         target_RE:      str, name of target reference electrode (s. RE_dict)
         C_exp:          bool, capacitance plot
         atomic:         bool, normalization on atomic surface sites
-        c_corr:         bool, Nernst shift for halide concentration to 1M
+        c_corr:         dict {ads: V_dec}, Voltage shift of 'V_dec' (V) for concentration of adsorbate 'ads' to 1M
 
         Outputs:
         fig (matplotlib)
@@ -156,8 +156,8 @@ class CV_Analyzer:
             self.CV_df['j_corr'] = self.CV_df['j_corr'] / rho_atomic
 
         # apply concentration correction
-        if c_corr:
-            self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.c_corr()
+        if len(c_corr) > 0:
+            self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.c_correction(c_corr)
 
         # plot
         fig = plt.figure(f'CV_settings: {settings}')
@@ -180,7 +180,7 @@ class CV_Analyzer:
             upper_lim,
             target_RE,
             atomic=False,
-            c_corr=False,
+            c_corr={},
             base_cap=0):
 
         """
@@ -197,7 +197,7 @@ class CV_Analyzer:
         upper_lim:      float, upper voltage limit in V
         target_RE:      str, name of target reference electrode (s. RE_dict)
         atomic:         bool, normalization on atomic surface sites
-        c_corr:         bool, Nernst shift for halide concentration to 1M
+        c_corr:         dict {ads: V_dec}, Voltage shift of 'V_dec' (V) for concentration of adsorbate 'ads' to 1M
 
         Outputs:
         fig (matplotlib)
@@ -205,20 +205,14 @@ class CV_Analyzer:
         fig3 (matplotlib)
         """
 
-        settings = f'{lower_lim=} V, {upper_lim=} V, {target_RE=}, {atomic=}, {c_corr=}'
+        settings = f'{lower_lim=} V, {upper_lim=} V, {target_RE=}, {atomic=}, {c_corr=}, {base_cap=}'
 
         # extra columns for corrections
         self.CV_df['U_corr'] = self.CV_df['U']
         self.CV_df['j_corr'] = self.CV_df['j']
 
-        # reference to target_RE
-        self.CV_df['U_corr'] = self.CV_df['U'] - self.ref_to(target_RE)
-
-        # apply concentration correction
-        if c_corr:
-            self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.c_corr()
-        else:
-            pass
+        # reference correction
+        self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.ref_to(target_RE)
 
         # check voltage limits
         if lower_lim < min(self.CV_df['U_corr']) \
@@ -226,7 +220,7 @@ class CV_Analyzer:
             raise ValueError(f'Voltage limits out of range for {self.name} !')
 
         # current to capacitance
-        self.CV_df['j_corr'] = self.CV_df['j_corr'] / self.scan_rate # µF/cm²
+        self.CV_df['j_corr'] = self.CV_df['j_corr'] / self.scan_rate
 
         # atomic units
         if atomic:
@@ -234,35 +228,34 @@ class CV_Analyzer:
             self.CV_df['j_corr'] = self.CV_df['j_corr'] / (constants.e * 10**6) / norm_factor
             # µF/cm² / µC/e- / atoms/cm² = e-/(V*atom)
 
+        # apply concentration correction
+        if len(c_corr) > 0:
+            self.CV_df['U_corr'] = self.CV_df['U_corr'] - self.c_correction(c_corr)
+
         # seperate anodic and cathodic scan, apply voltage limits
         forw_scan = self.CV_df.where(
             (self.CV_df['j_corr'] > 0)
             & (self.CV_df['U_corr'] > lower_lim)
             & (self.CV_df['U_corr'] < upper_lim)
-                )
+                ).dropna()
         backw_scan = self.CV_df.where(
             (self.CV_df['j_corr'] < 0)
             & (self.CV_df['U_corr'] > lower_lim)
             & (self.CV_df['U_corr'] < upper_lim)
-                )
+                ).dropna()
 
         # voltage for the integration needs to start with 0 V
         int_voltage_forw    = forw_scan['U_corr'] - lower_lim
         int_voltage_backw   = backw_scan['U_corr'] - lower_lim
 
-        # convert to numpy and remove nan values (needed for np.trapz() integration)
+        # convert to numpy (needed for np.trapz() integration)
         voltage_forw_np         = forw_scan['U_corr'].to_numpy()
-        voltage_forw_np         = voltage_forw_np[~np.isnan(voltage_forw_np)]
         voltage_backw_np        = backw_scan['U_corr'].to_numpy()
-        voltage_backw_np        = voltage_backw_np[~np.isnan(voltage_backw_np)]
         forw_scan_np            = forw_scan['j_corr'].to_numpy()
-        forw_scan_np            = forw_scan_np[~np.isnan(forw_scan_np)]
         backw_scan_np           = backw_scan['j_corr'].to_numpy()
-        backw_scan_np           = backw_scan_np[~np.isnan(backw_scan_np)]
         int_voltage_forw_np     = np.array(int_voltage_forw)
-        int_voltage_forw_np     = int_voltage_forw_np[~np.isnan(int_voltage_forw_np)]
         int_voltage_backw_np    = np.array(int_voltage_backw)
-        int_voltage_backw_np    = int_voltage_backw_np[~np.isnan(int_voltage_backw_np)]
+
 
         # integrate
         Q_forw_int  = [np.trapz(forw_scan_np[:i+1], int_voltage_forw_np[:i+1])
@@ -285,9 +278,9 @@ class CV_Analyzer:
                 color='k', linestyles='dashed')       
         plt.xlabel(f'U / V vs. {target_RE}')
         if atomic:
-            plt.ylabel('j / µF/atom)')
+            plt.ylabel('C / e-/(V*atom)')
         else:
-            plt.ylabel('j / µF/cm$^2$')
+            plt.ylabel('C / µF/cm$^2$')
 
         # evaluate Q_forw over voltage and plot
         fig2 = plt.figure(f'int_forw {settings}')
@@ -442,45 +435,45 @@ class CV_Analyzer:
         return offset
 
 
-    def c_corr(self):
+    def c_correction(self, c_corr):
         """
-        Helping function to calculate Nernstian shift (59 mV/dec)
-        for the halide concentration (F-, Cl-, Br-, I-).
-        Normalization on 1M halide concentration.
+        shift potential scale for a certain value (V_dec) per decade concentration of ads.
+        Normalization on 1M concentration of respective adsorbate.
 
         Inputs:
-        None
+        c_corr:     dict {ads: V_dec}, Voltage shift of 'V_dec' (V) for concentration of adsorbate 'ads' to 1M
+                    (can be several adsorbates)
 
         Outputs:
-        offset: float, the Nernstian potential shift that is substracted
+        offset:     float, the Nernstian potential shift that is substracted
         """
+        
+        for i, j in zip(c_corr.keys(), c_corr.values()):
+            ads = i
+            V_dec = j
 
-        # list of typical halide adsorbates
-        ads_set = {'LiCl', 'NaCl', 'KCl', 'RbCl', 'CsCl',
-                'LiBr', 'NaBr', 'KBr', 'RbBr', 'CsBr',
-                'LiI', 'NaI', 'KI', 'RbI', 'CsI'
-                }
-        # get list of common elements
-        ads = list(ads_set.intersection(self.electrolyte_name))
+            try:
+                if ads == 'H+':
+                    ads_conc = 10**(- self.pH)
+                
+                else:
+                    idx = self.electrolyte_name.index(ads)
+                    ads_conc = self.c_electrolyte[idx]
+                    unit = self.electrolyte_unit[idx]
 
-        if len(ads) > 1:
-            raise ValueError(f'Cannot handle more than one adsorbate: {ads}')
-        elif len(ads) == 0:
-            U_shift = 0
-        else:
-            idx = self.electrolyte_name.index(str(ads[0]))
-            ads_conc = self.c_electrolyte[idx]
-            unit = self.electrolyte_unit[idx]
-
-            if str(unit) == 'uM':
-                ads_conc = ads_conc / 1.e06
-            elif str(unit) == 'mM':
-                ads_conc = ads_conc / 1.e03
-            elif str(unit) != 'M':
-                raise ValueError(f'Unit Error: {unit}')
+                    # unit to molar
+                    if str(unit) == 'uM':
+                        ads_conc = ads_conc / 1.e06
+                    elif str(unit) == 'mM':
+                        ads_conc = ads_conc / 1.e03
+                    elif str(unit) != 'M':
+                        raise ValueError(f'Unit conversion error: {unit}')
+                
+                U_shift = V_dec * math.log10(ads_conc)
             
-            R, F = constants.R, constants.value('Faraday constant')
-            U_shift = - (R * self.T / F) * np.log(ads_conc)
+            except:
+                print(f'Potential of {self.label} not in shifted in respect to {ads}.')
+                U_shift = 0
 
         return U_shift
 
@@ -498,6 +491,7 @@ class CV_Analyzer:
         pH: float, pH value
         """
 
+        # only strong acids and bases are considered
         acids_1H = [
             'HCl', 'HClO4', 
         ]

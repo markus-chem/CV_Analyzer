@@ -38,7 +38,7 @@ electrochemical system:
               concentration:
                   value: 50
                   unit: uM #[M, mM, µM, g kg-1, ...]
-              type: #
+              type: salt #
               source:
                   supplier:
                   LOT: 

@@ -17,7 +17,8 @@ def get_database():
     """
     Get list of .json file directories in the database folder
     
-    Inputs: None
+    Inputs:
+    None
     
     Outputs:
     List of directories
@@ -35,9 +36,11 @@ def filter_db(metal, hkl, component, **kwargs):
     Searches for datapackages in 'database' folder that match the criteria:
         - metal
         - hkl of surface
-        - component (can be a fraction, e.g. 'Br' if component is 'NaBr')
-        - include_author (can be a fraction)
-        - exclude_author (do not show this author)
+        - component
+
+        - exclude component
+        - include_author 
+        - exclude_author
         - include_label
         - exclude_label
 
@@ -48,15 +51,17 @@ def filter_db(metal, hkl, component, **kwargs):
     Within one filter the selection is additive (e.g. component=['Pt','Ag'] shows both)
 
     Inputs:
-    **kwargs:
-        metal:          list of str, material of working electrode
-        hkl:            list of str, lattice plane
-        component:      list of str, component of the electrolyte
-        include_author:    list, list of first authors last name you wish to include,
-                        defaults to []
-        exclude_author: list, list of authors last name you wish to exclude, defaults to []
-        include_label:  list of labels to be include, default to []
-        exclude_label:  list of labels to be exclude, default to []
+    
+        metal:              list of str, material of working electrode
+        hkl:                list of str, lattice plane
+        component:          list of str, component of the electrolyte
+
+        **kwargs:
+            exclude_component:  list of str, component to be excluded
+            include_author:     list of str, first authors last name to be included
+            exclude_author:     list of str, first author last name to be excluded
+            include_label:      list of str, labels to be included
+            exclude_label:      list of str, labels to be excluded
 
     Outputs:
     list of selected datapackages
@@ -65,16 +70,7 @@ def filter_db(metal, hkl, component, **kwargs):
     files = get_database()
     print(f'{len(files)} files loaded')
 
-    include_author  = kwargs.get('include_author', [])
-    exclude_author  = kwargs.get('exclude_author', [])
-    include_label   = kwargs.get('include_label', [])
-    exclude_label   = kwargs.get('exclude_label', [])
-
-    include_author  = [j.lower() for j in include_author]
-    exclude_author  = [j.lower() for j in exclude_author]
-    include_label   = [j.lower() for j in include_label]
-    exclude_label   = [j.lower() for j in exclude_label]
-
+    # inputs should be list of strings
     if not isinstance(metal, list):
         metal = [metal]
     if not isinstance(hkl, list):
@@ -82,15 +78,25 @@ def filter_db(metal, hkl, component, **kwargs):
     hkl = [str(i) for i in hkl]
     if not isinstance(component, list):
         component = [component]
+    for k in kwargs.keys():
+        if not isinstance(kwargs[k], list):
+            kwargs[k] = [kwargs[k]]
 
-    selxn = set(CV_Analyzer(Package(i), 0) for i in files) # only the first resource is considered
+    exclude_component   = kwargs.get('exclude_component', [])
+    include_author      = kwargs.get('include_author', [])
+    exclude_author      = kwargs.get('exclude_author', [])
+    include_label       = kwargs.get('include_label', [])
+    exclude_label       = kwargs.get('exclude_label', [])
+
+    # Apply filter criteria
+    selxn = set(CV_Analyzer(Package(i), 0) for i in files) # only the first resource of datapackage is considered
     for i in selxn.copy():  # iterate over copy, set cannot be changed during iteration
-        # Apply filter criteria
+        
         if len(metal) > 0:
             if i.metal not in metal:
                 try:
                     selxn.remove(i)
-                except BaseException:
+                except:
                     pass
             else:
                 pass
@@ -99,7 +105,7 @@ def filter_db(metal, hkl, component, **kwargs):
             if i.hkl not in hkl:
                 try:
                     selxn.remove(i)
-                except BaseException:
+                except:
                     pass
             else:
                 pass
@@ -109,21 +115,27 @@ def filter_db(metal, hkl, component, **kwargs):
             if any(k in i.electrolyte_name for j, k in enumerate(component)) == False:
                 try:
                     selxn.remove(i)
-                except BaseException:
+                except:
                     pass
-
-        if len(include_author) > 0:
-            # remove element if none of the filter criteria matches
-            if any(k in i.author for j, k in enumerate(include_author)) == False:
-                try:
-                    selxn.remove(i)
-                except BaseException:
-                    pass
-
-        if any(i.author is k for j, k in enumerate(exclude_author)):
+        
+        if any(k in i.electrolyte_name for j, k in enumerate(exclude_component)):
             try:
                 selxn.remove(i)
-            except BaseException:
+            except:
+                pass
+
+
+        if len(include_author) > 0:
+            if any(k == i.author for j, k in enumerate(include_author)) == False:
+                try:
+                    selxn.remove(i)
+                except:
+                    pass
+
+        if any(i.author == k for j, k in enumerate(exclude_author)):
+            try:
+                selxn.remove(i)
+            except:
                 pass
         else:
             pass
@@ -132,14 +144,13 @@ def filter_db(metal, hkl, component, **kwargs):
             if any(k in i.label for j, k in enumerate(include_label)) == False:
                 try:
                     selxn.remove(i)
-                except BaseException:
+                except:
                     pass
 
-        # if any(i.label.find(k) != -1 for j, k in enumerate(exclude_label)):
         if any(k in i.label for j, k in enumerate(exclude_label)):
             try:
                 selxn.remove(i)
-            except BaseException:
+            except:
                 pass
         else:
             pass
@@ -147,7 +158,7 @@ def filter_db(metal, hkl, component, **kwargs):
     if len(selxn) > 0:
         print(f'{len(selxn)} files selected')
     else:
-        raise ValueError('No datapackages meet filter criteria.')
+        raise Exception('No datapackages meet filter criteria.')
 
     return list(selxn)
 
@@ -204,7 +215,7 @@ def create_datapackage(sampling_interval=0.05):
     procedure in the svgdigitizer module.
 
     Inputs:
-    sampling_interval: float
+    sampling_interval: float, sampling interval of the interpolation in Volts
 
     Outputs:
     None
@@ -239,7 +250,15 @@ def create_datapackage(sampling_interval=0.05):
     return None
 
 def export_datapackage(svg, metadata, sampling_interval):
+    '''
+    Exports the .svg and the .yaml file with a given sampling_interval
+    into a datapackage
 
+    Inputs:
+    svg:                str, name of .svg file
+    metadata:           str, name of .yaml file
+    sampling_inteval:   float, sampling interval of the interpolation in Volts
+    '''
     if metadata:
         with open(metadata, 'r') as f:
             metadata = yaml.load(f, Loader=yaml.SafeLoader)

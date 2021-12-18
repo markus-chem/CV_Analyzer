@@ -38,7 +38,7 @@ electrochemical system:
               concentration:
                   value: 0.1
                   unit: M #[M, mM, µM, g kg-1, ...]
-              type: #
+              type: acid #
               source:
                   supplier:
                   LOT: 
