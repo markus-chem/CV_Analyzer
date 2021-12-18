@@ -15,11 +15,12 @@ To the CVs, different corrections can be applied:
 - normalize the geometric curren density to surface atoms of the respective lattice plane
 - integrate the charge flow within voltage limits
 
-**installation**
+**Installation**
 
 ``pip install -e .``
 
-Examples in example.ipynb
+**Examples**
+in example_notebook/example.ipynb
 
 
 
